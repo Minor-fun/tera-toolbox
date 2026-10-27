@@ -1,0 +1,13 @@
+@font-face {
+    font-family: "Source Han Sans";
+    src: url("./fonts/source-han-sans.woff2") format("woff2");
+    font-style: normal;
+    font-weight: 100 900;
+    font-display: swap;
+}
+@font-face {
+    font-family: "Toolbox Mono";
+    src: url("../fonts/roboto-mono-latin-400-normal.woff2") format("woff2");
+    font-weight: 400;
+    font-display: swap;
+}

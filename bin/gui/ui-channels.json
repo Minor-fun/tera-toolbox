@@ -1,0 +1,7 @@
+{
+  "background": "ui background",
+  "maximize": "ui maximize",
+  "windowState": "ui window state",
+  "windowSize": "ui window size",
+  "startupProgress": "ui startup progress"
+}

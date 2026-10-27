@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "files": [
+    "assets/backgrounds/skylight-default-poster.jpg",
+    "assets/backgrounds/skylight-default.mp4",
+    "assets/backgrounds/skylight-default.png",
+    "bridge.js",
+    "css/main.css",
+    "fonts/OFL.txt",
+    "fonts/source-han-sans.woff2",
+    "js/main.js",
+    "licenses/Material-Symbols-LICENSE.txt",
+    "licenses/Material-Symbols-NOTICE.md",
+    "main.html",
+    "media-probe.html",
+    "media-probe.js",
+    "media/success.mp3",
+    "splash.css",
+    "splash.html",
+    "splash.js",
+    "theme.css"
+  ]
+}

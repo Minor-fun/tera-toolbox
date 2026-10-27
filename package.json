@@ -4,7 +4,7 @@
   "description": "Comprehensive modding framework for TERA.",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/tera-private-toolbox/tera-toolbox.git"
+    "url": "git+https://github.com/Minor-fun/tera-toolbox.git"
   },
   "scripts": {
     "manifest": "node ./.manifest.js"
@@ -19,9 +19,9 @@
     "node": ">=16.9.1"
   },
   "bugs": {
-    "url": "https://github.com/tera-private-toolbox/tera-toolbox/issues"
+    "url": "https://github.com/Minor-fun/tera-toolbox/issues"
   },
-  "homepage": "https://github.com/tera-private-toolbox/tera-toolbox#readme",
+  "homepage": "https://github.com/Minor-fun/tera-toolbox/tree/beta#readme",
   "dependencies": {
     "node-fetch": "^2.6.0",
     "binary-search": "^1.3.6"

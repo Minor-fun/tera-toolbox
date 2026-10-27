@@ -1,13 +1,15 @@
-# TERA Toolbox Private Beta
-A future update of TERA Toolbox, which includes a complete GUI overhaul and a migration to a newer version of Electron, which should overall provide better performance and stability.  Based on the latest beta-branch of the official repository, many fixes and improvements have been made.
+# TERA Toolbox - Skylight UI
+Windows x64 TERA Toolbox with the Skylight interface. Development and updates use the `beta` branch.
 
 ## Download
 
-- Installer: https://git.teragame.su/attachments/3d1dde89-ee16-4145-b6f0-61fc12255e38
-- Git repository: https://git.teragame.su/tera-private-toolbox/tera-toolbox-beta
+- [Portable GUI](https://github.com/Minor-fun/tera-toolbox/releases): Electron included.
+- [Source code (beta)](https://github.com/Minor-fun/tera-toolbox/tree/beta): Electron is not included in source downloads.
 
-## Installation Instructions
+## Run
 
-Clone this repository or use the installer to install this version separately. To migrate modules from the current version of TERA Toolbox, just move or copy your **mods** folder to the installation path of this version.
+- GUI: extract the portable archive and run `TeraToolbox.exe` or `TeraToolbox_NoAdmin.exe`.
+- CLI: install Node.js 16 x64 (16.20.2 recommended), then run `TeraToolboxCLI.exe` or `TeraToolboxCLI_NoAdmin.exe`.
+- `_NoAdmin` launchers do not request administrator privileges.
 
-As this version is under testing, please ask for any questions or issues on our discord: https://discord.gg/CZMYNhXwwS
+UI design: Minor-fun. Based on [TERA Toolbox Private](https://github.com/tera-private-toolbox/tera-toolbox/tree/beta).

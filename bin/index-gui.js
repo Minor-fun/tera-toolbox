@@ -6,21 +6,27 @@ const SupportURL = 'https://discord.gg/CZMYNhXwwS';
 
 const { app } = require('electron');
 const path = require('path');
+const { resolveUI } = require('./gui/ui-resources');
+const { translator, languageOf } = require('./gui/ui-i18n');
 
 // Utility
 function showDialog(data) {
     const { dialog } = require('electron');
-    dialog.showMessageBoxSync(data);
+    dialog.showMessageBoxSync({ buttons: [t('ok')], ...data });
 }
 
 // Splash Screen
 let SplashScreen = null;
 let SplashScreenShowTime = 0;
+let SplashCaption = '';
+let SplashInfo = '';
 
 function showSplashScreen() {
     try {
         const guiRoot = path.join(__dirname, 'gui');
         const guiIcon = path.join(guiRoot, '/assets/icon.ico');
+        const ui = resolveUI();
+        const appearance = ui.skylight ? require('./gui/ui-appearance').splashAppearance(config[0]) : null;
 
         const { BrowserWindow } = require('electron');
         SplashScreen = new BrowserWindow({
@@ -31,18 +37,27 @@ function showSplashScreen() {
             minHeight: 400,
             icon: guiIcon,
             frame: false,
-            backgroundColor: '#1e1e1e',
+            backgroundColor: appearance ? (appearance.theme === 'light' ? '#F5F6F8' : '#20242A') : '#1e1e1e',
             resizable: false,
             show: false,
             webPreferences: {
                 nodeIntegration: true,
                 contextIsolation: false,
-                enableRemoteModule: true,
+                enableRemoteModule: !ui.skylight,
+                additionalArguments: [
+                    ...(appearance ? [`--toolbox-appearance=${encodeURIComponent(JSON.stringify(appearance))}`] : []),
+                    `--toolbox-language=${encodeURIComponent(languageOf(config[0].uilanguage))}`
+                ],
                 devTools: false
             }
         });
 
-        SplashScreen.loadFile(path.join(guiRoot, 'splash.html'));
+        SplashScreen.loadFile(ui.splash);
+        SplashScreen.webContents.once('did-finish-load', () => {
+            if (!SplashScreen) return;
+            SplashScreen.webContents.send('caption', SplashCaption);
+            SplashScreen.webContents.send('info', SplashInfo);
+        });
         SplashScreen.once('ready-to-show', () => SplashScreen.show());
         SplashScreenShowTime = Date.now();
     } catch (e) {
@@ -63,11 +78,13 @@ function hideSplashScreen(onDone) {
 }
 
 function setSplashScreenCaption(caption) {
+    SplashCaption = caption;
     if (SplashScreen)
         SplashScreen.webContents.send('caption', caption);
 }
 
 function setSplashScreenInfo(info) {
+    SplashInfo = info;
     if (SplashScreen)
         SplashScreen.webContents.send('info', info);
 }
@@ -83,7 +100,7 @@ async function updateSelf() {
     updater.on('run_start', () => {
         console.log(`[update] Self-update started (Branch: ${updater.branch})`);
 
-        setSplashScreenCaption('Running self-update...');
+        setSplashScreenCaption(t('selfUpdating'));
         setSplashScreenInfo('');
     });
 
@@ -91,56 +108,56 @@ async function updateSelf() {
         if (updatelog)
             console.log(`[update] Update check started (Server: ${serverIndex})`);
 
-        setSplashScreenCaption('Checking for updates...');
-        setSplashScreenInfo(`Server ${serverIndex}`);
+        setSplashScreenCaption(t('updateChecking'));
+        setSplashScreenInfo(t('updateServer', { serverIndex }));
     });
     updater.on('check_success', (serverIndex, operations) => {
         if (updatelog)
             console.log(`[update] Update check finished (Server: ${serverIndex}), ${operations.length} operations required`);
 
-        setSplashScreenCaption('Update check finished!');
-        setSplashScreenInfo(`Server ${serverIndex}`);
+        setSplashScreenCaption(t('updateCheckFinished'));
+        setSplashScreenInfo(t('updateServer', { serverIndex }));
     });
     updater.on('check_fail', (serverIndex, e) => {
-        errors.push(`TERA Toolbox was unable to check for updates on server ${serverIndex}!\n${e}`);
+        errors.push(t('updateServerError', { serverIndex, error: e }));
         console.log(`[update] Update check failed (Server: ${serverIndex}): ${e}`);
 
-        setSplashScreenCaption(`Update check failed (server ${serverIndex})!`);
+        setSplashScreenCaption(t('updateCheckServerFailed', { serverIndex }));
     });
     updater.on('check_fail_all', () => {
-        errors.push(`TERA Toolbox was unable to check for updates using any server!\nThis is most likely an issue caused by your internet connection or your system configuration.`);
+        errors.push(t('updateServersError'));
         console.log('[update] Update check failed');
 
-        setSplashScreenCaption('Update check failed!');
+        setSplashScreenCaption(t('updateCheckFailed'));
     });
 
     updater.on('prepare_start', () => {
         if (updatelog)
             console.log(`[update] Update download and preparation started`);
 
-        setSplashScreenCaption('Preparing update...');
+        setSplashScreenCaption(t('updatePreparing'));
         setSplashScreenInfo('');
     });
     updater.on('download_start', (serverIndex, relpath) => {
         if (updatelog)
             console.log(`[update] - Download: ${relpath} (Server: ${serverIndex})`);
 
-        setSplashScreenCaption(`Downloading update (server ${serverIndex})...`);
+        setSplashScreenCaption(t('updateDownloading', { serverIndex }));
         setSplashScreenInfo(relpath);
     });
     updater.on('download_error', (relpath, expected_hash, downloaded_hash) => {
         console.log(`[update] - Error downloading ${relpath}: file hash mismatch (expected: ${expected_hash}, found: ${downloaded_hash})!`);
 
-        setSplashScreenCaption('Error downloading update!');
+        setSplashScreenCaption(t('updateDownloadFailed'));
         setSplashScreenInfo(relpath);
 
-        errors.push(`File hash mismatch in downloaded file "${relpath}"!\nExpected: ${expected_hash}\nFound: ${downloaded_hash}`);
+        errors.push(t('updateHashError', { path: relpath, expected: expected_hash, found: downloaded_hash }));
     });
     updater.on('prepare_finish', () => {
         if (updatelog)
             console.log(`[update] Update download and preparation finished`);
 
-        setSplashScreenCaption('Update prepared!');
+        setSplashScreenCaption(t('updatePrepared'));
         setSplashScreenInfo('');
     });
 
@@ -148,14 +165,14 @@ async function updateSelf() {
         if (updatelog)
             console.log(`[update] Update installation started`);
 
-        setSplashScreenCaption('Installing update...');
+        setSplashScreenCaption(t('updateInstalling'));
         setSplashScreenInfo('');
     });
     updater.on('install_start', (relpath) => {
         if (updatelog)
             console.log(`[update] - Install: ${relpath}`);
 
-        setSplashScreenCaption('Installing update...');
+        setSplashScreenCaption(t('updateInstalling'));
         setSplashScreenInfo(relpath);
     });
     updater.on('install_error', (relpath, e) => {
@@ -168,28 +185,28 @@ async function updateSelf() {
             console.log('[update] - Close all game clients or restart your computer, then try again!');
         }
 
-        setSplashScreenCaption('Error installing update!');
+        setSplashScreenCaption(t('updateInstallFailed'));
         setSplashScreenInfo(relpath);
 
         if (relpath.startsWith('node_modules/tera-client-interface/scanner/'))
-            errors.push(`Unable to install "${relpath}"!\n${e}\n\nYour anti-virus software most likely falsely detected TERA Toolbox to be a virus.\nPlease whitelist it!`);
+            errors.push(t('updateInstallError', { path: relpath, error: e }) + '\n\n' + t('updateAntivirusHint'));
         else if (relpath === 'node_modules/tera-client-interface/tera-client-interface.dll')
-            errors.push(`Unable to install "${relpath}"!\n${e}\n\nThis is most likely caused by an instance of the game client that is still running.\nClose all game clients or restart your computer, then try again!`);
+            errors.push(t('updateInstallError', { path: relpath, error: e }) + '\n\n' + t('updateGameRunningHint'));
         else
-            errors.push(`Unable to install "${relpath}"!\n${e}`);
+            errors.push(t('updateInstallError', { path: relpath, error: e }));
     });
     updater.on('execute_finish', () => {
         if (updatelog)
             console.log(`[update] Update installation finished`);
 
-        setSplashScreenCaption('Update installed!');
+        setSplashScreenCaption(t('updateInstalled'));
         setSplashScreenInfo('');
     });
 
     updater.on('run_finish', (success) => {
         console.log(`[update] Self-update ${success ? 'finished' : 'failed'}`);
 
-        setSplashScreenCaption(`Self-update ${success ? 'finished' : 'failed'}!`);
+        setSplashScreenCaption(t(success ? 'selfUpdateFinished' : 'selfUpdateFailed'));
         setSplashScreenInfo('');
     });
 
@@ -217,32 +234,32 @@ function main() {
         // Perform self-update
         updateSelf().then(errors => {
             if (errors && errors.length > 0) {
-                let errmsg = `TERA Toolbox was unable to update itself. If the problem persists, ask here ${SupportURL} for help!\n\nThe full error message is:\n\n------------------------------\n`;
+                let errmsg = t('selfUpdateErrorHelp', { supportUrl: SupportURL }) + '\n\n' + t('fullErrorMessage') + '\n\n------------------------------\n';
                 errmsg += errors.join('\n------------------------------\n');
 
                 showDialog({
                     type: 'error',
-                    title: 'Self-update error!',
+                    title: t('selfUpdateErrorTitle'),
                     message: errmsg
                 });
             }
         }).catch(e => {
             showDialog({
                 type: 'error',
-                title: 'Self-update error!',
-                message: `TERA Toolbox was unable to update itself. If the problem persists, ask here ${SupportURL} for help!\n\nThe full error message is:\n${e}`
+                title: t('selfUpdateErrorTitle'),
+                message: t('selfUpdateErrorHelp', { supportUrl: SupportURL }) + '\n\n' + t('fullErrorMessage') + `\n${e}`
             });
         }).finally(() => {
             const { updateRequired, update } = require('./update-electron.js');
             if (updateRequired()) {
-                setSplashScreenCaption('Downloading Electron update...');
+                setSplashScreenCaption(t('electronUpdating'));
                 setSplashScreenInfo('');
 
                 update().catch(e => {
                     showDialog({
                         type: 'error',
-                        title: 'Electron update error!',
-                        message: `TERA Toolbox was unable to update Electron. If the problem persists, ask here ${SupportURL} for help!\n\nThe full error message is:\n${e}\n\nThe program will now be terminated.`
+                        title: t('electronUpdateErrorTitle'),
+                        message: t('electronUpdateErrorHelp', { supportUrl: SupportURL }) + '\n\n' + t('fullErrorMessage') + `\n${e}\n\n` + t('programTerminated')
                     });
                 }).finally(() => {
                     app.exit();
@@ -256,11 +273,15 @@ function main() {
 
 // -------------------------------------------------------------------
 // Safely load configuration
-let branch = 'master';
+let branch = 'beta';
 let updatelog = false;
 let noselfupdate = false;
 
 const config = require('./config').loadConfig(true);
+const { TeraToolboxMUI, InitializeDefaultInstance } = require('tera-toolbox-mui');
+InitializeDefaultInstance(languageOf(config[0].uilanguage));
+const t = translator(config[0].uilanguage, TeraToolboxMUI);
+SplashCaption = t('splashInitializing');
 if (config[1] > 0) console.warn('warn:[update] WARNING: An error occurred while trying to read the config file! Falling back to default values.');
 if (config[0].branch) branch = config[0].branch.toLowerCase();
 updatelog = !!config[0].updatelog;

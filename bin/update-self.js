@@ -7,9 +7,7 @@ const EventEmitter = require('events');
 
 // Constants
 const AutoUpdateServers = [
-    'https://raw.githubusercontent.com/tera-private-toolbox/tera-toolbox/',
-    'https://gitlab.com/tera-private-toolbox/tera-toolbox/-/raw/',
-    'https://git.teragame.su/tera-private-toolbox/tera-toolbox/raw/',
+    'https://raw.githubusercontent.com/Minor-fun/tera-toolbox/',
 ];
 
 // Implementation
@@ -33,7 +31,7 @@ function hash(data) {
 }
 
 class Updater extends EventEmitter {
-    constructor(branch = 'master') {
+    constructor(branch = 'beta') {
         super();
         this.setMaxListeners(0);
 

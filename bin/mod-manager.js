@@ -42,7 +42,7 @@ class ModManager {
     }
 
     // Mods & Global mod instances
-    loadAll() {
+    loadAll(onProgress) {
         // List installed modules
         this.installedMods.clear();
         listModules(this.rootFolder).forEach(name => {
@@ -64,43 +64,73 @@ class ModManager {
             }
         });
 
-        // Check dependencies and conflicts
-        let ModRemoved;
-        do {
-            ModRemoved = false;
+        // Observe this preload pass only, including loads triggered recursively by dependencies.
+        this.preloadProgress = typeof onProgress === 'function' ? {
+            notify: onProgress, pending: new Set(this.installedMods.keys()),
+            total: this.installedMods.size, completed: 0, loaded: 0, failed: 0, skipped: 0
+        } : null;
+        this.reportPreload();
+        try {
+            // Check dependencies and conflicts
+            let ModRemoved;
+            do {
+                ModRemoved = false;
 
-            this.installedMods.forEach((info, name) => {
-                info.dependencies.forEach(dependency => {
-                    if (!this.isInstalled(dependency)) {
-                        console.error(mui.get('mod-manager/missing-mod-dependency-error', { name: printableName(info), dependency }));
-                        this.installedMods.delete(name);
-                        ModRemoved = true;
-                    }
+                this.installedMods.forEach((info, name) => {
+                    info.dependencies.forEach(dependency => {
+                        if (!this.isInstalled(dependency)) {
+                            console.error(mui.get('mod-manager/missing-mod-dependency-error', { name: printableName(info), dependency }));
+                            this.installedMods.delete(name);
+                            this.finishPreload(info, 'skipped');
+                            ModRemoved = true;
+                        }
+                    });
                 });
+
+                this.installedMods.forEach((info, name) => {
+                    info.conflicts.forEach(conflict => {
+                        if (this.isInstalled(conflict)) {
+                            console.error(mui.get('mod-manager/mod-conflict-error', { name: printableName(info), conflict }));
+                            this.installedMods.delete(name);
+                            this.finishPreload(info, 'skipped');
+                            ModRemoved = true;
+                        }
+                    });
+                });
+            } while (ModRemoved);
+
+            // Load core mods first
+            this.installedMods.forEach(mod => {
+                if (this.isLoaded(mod.name)) this.finishPreload(mod, 'loaded');
+                if (this.isCoreMod(mod.name) && !this.isLoaded(mod.name))
+                    this.load(mod.name);
             });
 
-            this.installedMods.forEach((info, name) => {
-                info.conflicts.forEach(conflict => {
-                    if (this.isInstalled(conflict)) {
-                        console.error(mui.get('mod-manager/mod-conflict-error', { name: printableName(info), conflict }));
-                        this.installedMods.delete(name);
-                        ModRemoved = true;
-                    }
-                });
+            // Then load other mods
+            this.installedMods.forEach(mod => {
+                if (!this.isCoreMod(mod.name) && !this.isLoaded(mod.name))
+                    this.load(mod.name);
             });
-        } while (ModRemoved);
+        } finally {
+            this.preloadProgress = null;
+        }
+    }
 
-        // Load core mods first
-        this.installedMods.forEach(mod => {
-            if (this.isCoreMod(mod.name) && !this.isLoaded(mod.name))
-                this.load(mod.name);
-        });
+    reportPreload(info) {
+        const progress = this.preloadProgress;
+        if (!progress) return;
+        const { total, completed, loaded, failed, skipped } = progress;
+        const current = info ? String(info.options.guiName || info.options.cliName || info.rawName || info.name).slice(0, 200) : '';
+        // Progress is advisory; a disconnected UI must not change module loading behavior.
+        try { progress.notify({ total, completed, loaded, failed, skipped, current }); } catch (_) {}
+    }
 
-        // Then load other mods
-        this.installedMods.forEach(mod => {
-            if (!this.isCoreMod(mod.name) && !this.isLoaded(mod.name))
-                this.load(mod.name);
-        });
+    finishPreload(info, result) {
+        const progress = this.preloadProgress;
+        if (!progress || !progress.pending.delete(info.name)) return;
+        progress.completed++;
+        progress[result]++;
+        this.reportPreload(info);
     }
 
     unloadAll() {
@@ -124,12 +154,18 @@ class ModManager {
             if (logInfo)
                 console.error(mui.get('mod-manager/cannot-load-mod-not-installed', { name }));
         } else {
-            mod = new Mod(this, info);
-            if (!mod.loadCache())
-                return null;
-
-            this.loadedMods.set(info.name, mod);
-            mod.loadGlobalInstance(logInfo);
+            this.reportPreload(info);
+            let preloaded = false;
+            try {
+                mod = new Mod(this, info);
+                if (!mod.loadCache())
+                    return null;
+                preloaded = true;
+                this.loadedMods.set(info.name, mod);
+                mod.loadGlobalInstance(logInfo);
+            } finally {
+                this.finishPreload(info, preloaded ? 'loaded' : 'failed');
+            }
         }
 
         return mod;

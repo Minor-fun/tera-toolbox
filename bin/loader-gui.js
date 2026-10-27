@@ -1,16 +1,20 @@
 const fs = require('fs');
 const path = require('path');
 const exec = require('child_process').exec;
-const { app, BrowserWindow, powerMonitor, Tray, Menu, ipcMain, shell, dialog } = require('electron');
+const { app, BrowserWindow, powerMonitor, Tray, Menu, ipcMain, shell, dialog, screen } = require('electron');
 const DataFolder = path.join(__dirname, '..', 'data');
 const ModuleFolder = path.join(__dirname, '..', 'mods');
+const { resolveUI } = require('./gui/ui-resources');
+const { mergeConfig } = require('./gui/ui-config');
+const uiChannels = require('./gui/ui-channels.json');
+const { translator, languageOf } = require('./gui/ui-i18n');
 
 // MUI
 const mui = require('tera-toolbox-mui').DefaultInstance;
 
 function InitializeMUI(language) {
     const { InitializeDefaultInstance } = require('tera-toolbox-mui');
-    InitializeDefaultInstance(language);
+    InitializeDefaultInstance(languageOf(language));
 }
 
 // Configuration
@@ -18,10 +22,12 @@ function LoadConfiguration() {
     delete require.cache[require.resolve('./config')];
     const resultArray = require('./config').loadConfig(true);
     if (resultArray[1] > 0) {
+        InitializeMUI(resultArray[0].uilanguage);
         const { dialog } = require('electron');
 
         dialog.showMessageBoxSync({
             'type': 'warning',
+            'buttons': [mui.get('gui/main/modal/buttons/ok')],
             'title': mui.get('loader-gui/error-config-file-corrupt/title'),
             'message': mui.get('loader-cli/warning-config-restore')
         });
@@ -34,9 +40,9 @@ function SaveConfiguration(newConfig) {
     global.TeraProxy.DevMode = !!newConfig.devmode;
     global.TeraProxy.GUITheme = newConfig.gui.theme;
 
-    InitializeMUI(newConfig.uilanguage);
-
     require('./config').saveConfig(newConfig);
+    InitializeMUI(newConfig.uilanguage);
+    if (gui) gui.refreshTray();
 }
 
 // Migration
@@ -49,6 +55,7 @@ function Migration() {
 
         dialog.showMessageBoxSync({
             'type': 'error',
+            'buttons': [mui.get('gui/main/modal/buttons/ok')],
             'title': mui.get('loader-gui/error-migration-failed/title'),
             'message': mui.get('loader-gui/error-migration-failed/message', { 'supportUrl': global.TeraProxy.SupportUrl })
         });
@@ -83,7 +90,10 @@ async function GetInstallableMods(forceRefresh = false) {
 let proxy = null;
 let proxyRunning = false;
 
-async function StartProxy(moduleFolder, proxyConfig) {
+async function StartProxy(moduleFolder, proxyConfig, reportProgress) {
+    const updateShare = proxyConfig.noupdate ? 0 : 45;
+    let updatePercent = 0;
+    reportProgress(proxyConfig.noupdate ? 'skipping' : 'updating', 0);
     if (proxyConfig.noupdate) {
         console.warn(mui.get('loader-gui/warning-noupdate-1'));
         console.warn(mui.get('loader-gui/warning-noupdate-2'));
@@ -94,30 +104,51 @@ async function StartProxy(moduleFolder, proxyConfig) {
         // Auto-update mods and run, we will run the proxy even if the modules are not updated
         const autoUpdate = require('./update');
         try {
-            const updateResult = await autoUpdate(moduleFolder, proxyConfig.updatelog, true);
+            const updateResult = await autoUpdate(moduleFolder, proxyConfig.updatelog, true, progress => {
+                const { fraction, ...update } = progress;
+                // Dependencies can enlarge the work list; never move backward or finish before all passes settle.
+                updatePercent = Math.max(updatePercent, Math.min(updateShare - 1, Math.floor(updateShare * fraction)));
+                reportProgress('updating', updatePercent, { update });
+            });
             updateResult.legacy.forEach(mod => console.warn(mui.get('loader-gui/warning-update-mod-not-supported', { 'name': mod.name })));
             updateResult.failed.forEach(mod => console.error(mui.get('loader-gui/error-update-mod-failed', { 'name': mod.name })));
         } catch (e) {
+            reportProgress('updating', updatePercent, { updateError: true });
             console.error(mui.get('loader-gui/error-update-failed'));
             console.error(e);
         }
     }
 
+    reportProgress('preloading', updateShare);
     const TeraProxy = require('./proxy');
-    proxy = new TeraProxy(moduleFolder, DataFolder, proxyConfig);
+    proxy = new TeraProxy(moduleFolder, DataFolder, proxyConfig, progress => {
+        const preloadPercent = progress.total ? updateShare + Math.floor((90 - updateShare) * progress.completed / progress.total) : 90;
+        reportProgress('preloading', preloadPercent, progress);
+    });
 
     try {
+        reportProgress('initializing', 90);
         // Switch to highest process priority so we don't starve because of game client using all CPU
         const { setHighestProcessPriority } = require('./utils');
         setHighestProcessPriority();
 
         // Start proxy
-        proxy.run();
+        reportProgress('starting', 90);
+        // run() starts listening asynchronously; do not report success before the socket is ready.
+        await new Promise((resolve, reject) => {
+            const server = proxy.clientInterfaceServer.server;
+            const cleanup = () => { server.removeListener('listening', ready); server.removeListener('error', failed); };
+            const ready = () => { cleanup(); resolve(); };
+            const failed = error => { cleanup(); reject(error); };
+            server.once('listening', ready);
+            server.once('error', failed);
+            try { proxy.run(); } catch (error) { failed(error); }
+        });
         proxyRunning = true;
         return true;
     } catch (_) {
         console.error(mui.get('loader-gui/error-cannot-start-proxy'));
-
+        try { proxy.destructor(); } catch (error) { console.error(error); }
         proxy = null;
         proxyRunning = false;
         return false;
@@ -134,6 +165,12 @@ async function StopProxy() {
     proxyRunning = false;
 
     // Switch back to normal process priority
+    startupProgress = { phase: 'idle', percent: 0 };
+    if (startupProgressTimer !== null) {
+        clearTimeout(startupProgressTimer);
+        startupProgressTimer = null;
+    }
+    startupProgressSender = null;
     const { setNormalProcessPriority } = require('./utils');
     setNormalProcessPriority();
 
@@ -192,9 +229,65 @@ process.on('SIGINT', cleanExit);
 process.on('SIGTERM', cleanExit);
 
 // IPC
+let proxyBusy = false;
+let startupProgress = { phase: 'idle', percent: 0 };
+let startupProgressTimer = null;
+let startupProgressSender = null;
+let startupProgressSentPhase = 'idle';
+
+function flushStartupProgress() {
+    startupProgressTimer = null;
+    const sender = startupProgressSender;
+    if (sender && !sender.isDestroyed()) {
+        sender.send(uiChannels.startupProgress, startupProgress);
+        startupProgressSentPhase = startupProgress.phase;
+    }
+}
+
+function reportStartupProgress(sender, phase, percent, progress) {
+    startupProgress = { ...(phase === 'preparing' ? {} : startupProgress), ...progress, phase, percent };
+    startupProgressSender = sender;
+    // Loader unit tests execute this file in a minimal VM without timer globals.
+    // Keep the original synchronous behavior there while batching in Electron.
+    if (typeof setTimeout !== 'function' || typeof clearTimeout !== 'function') {
+        flushStartupProgress();
+        return;
+    }
+    // Progress can arrive once per file. Keep phase milestones immediate and
+    // coalesce noisy same-phase updates to reduce IPC and renderer work.
+    const milestone = ['failed', 'ready'].includes(phase) || phase !== startupProgressSentPhase;
+    if (milestone) {
+        if (startupProgressTimer !== null) clearTimeout(startupProgressTimer);
+        flushStartupProgress();
+    } else if (startupProgressTimer === null) {
+        startupProgressTimer = setTimeout(flushStartupProgress, 32);
+    }
+}
+
+async function requestProxyStart(event) {
+    if (proxyBusy || proxy || proxyRunning) return;
+    proxyBusy = true;
+    event.sender.send('proxy starting');
+    reportStartupProgress(event.sender, 'preparing', 0);
+    console.log(mui.get('loader-gui/proxy-starting'));
+    try {
+        await StartProxy(ModuleFolder, config, (phase, percent, progress) => reportStartupProgress(event.sender, phase, percent, progress));
+    } catch (error) {
+        showError(error.toString());
+    } finally {
+        proxyBusy = false;
+        reportStartupProgress(event.sender, proxyRunning ? 'ready' : 'failed', proxyRunning ? 100 : startupProgress.percent);
+        if (!event.sender.isDestroyed()) event.sender.send('proxy running', proxyRunning);
+    }
+}
+
 ipcMain.on('init', (event, _) => {
     event.sender.send('set config', config);
-    event.sender.send('proxy running', false);
+    event.sender.send('proxy running', proxyRunning);
+    if (proxyBusy && !['ready', 'idle', 'failed'].includes(startupProgress.phase)) event.sender.send('proxy starting');
+    startupProgressSender = event.sender;
+    startupProgressSentPhase = startupProgress.phase;
+    event.sender.send(uiChannels.startupProgress, startupProgress);
     event.sender.send('is admin', global.TeraProxy.IsAdmin);
 
     if (config.noselfupdate) {
@@ -206,43 +299,42 @@ ipcMain.on('init', (event, _) => {
     }
 
     if (config.gui.autostart) {
-        event.sender.send('proxy starting');
-        console.log(mui.get('loader-gui/proxy-starting'));
-        StartProxy(ModuleFolder, config).then((result) => {
-            event.sender.send('proxy running', result);
-        });
+        requestProxyStart(event);
     }
 });
 
-ipcMain.on('start proxy', (event, _) => {
-    if (proxy || proxyRunning)
+ipcMain.on('start proxy', requestProxyStart);
+
+ipcMain.on('stop proxy', async (event, _) => {
+    if (proxyBusy || !proxy || !proxyRunning)
         return;
 
-    event.sender.send('proxy starting');
-    console.log(mui.get('loader-gui/proxy-starting'));
-    StartProxy(ModuleFolder, config).then((result) => {
-        event.sender.send('proxy running', result);
-    });
-});
-
-ipcMain.on('stop proxy', (event, _) => {
-    if (!proxy || !proxyRunning)
-        return;
-
+    proxyBusy = true;
     console.log(mui.get('loader-gui/proxy-stopping'));
-    StopProxy().then(() => {
-        event.sender.send('proxy running', false);
+    try {
+        await StopProxy();
         console.log(mui.get('loader-gui/proxy-stopped'));
-    });
+    } catch (error) {
+        showError(error.toString());
+    } finally {
+        proxyBusy = false;
+        if (!event.sender.isDestroyed()) event.sender.send('proxy running', proxyRunning);
+    }
 });
 
 ipcMain.on('get config', (event, _) => {
     event.sender.send('set config', config);
 });
 
-ipcMain.on('set config', (_, newConfig) => {
-    config = newConfig;
-    SaveConfiguration(config);
+ipcMain.on('set config', (event, newConfig) => {
+    const next = mergeConfig(config, newConfig);
+    try {
+        SaveConfiguration(next);
+        config = next;
+    } catch (error) {
+        showError(error.toString());
+    }
+    event.sender.send('set config', config);
 });
 
 ipcMain.on('get mods', (event, _) => {
@@ -303,12 +395,13 @@ ipcMain.on('open discord', (event) => {
 });
 
 ipcMain.on('save logs', (event, logs) => {
+    const t = translator(config && config.uilanguage, require('tera-toolbox-mui').TeraToolboxMUI);
     dialog.showSaveDialog({
-        'title': 'Select the File Path to save',
-        'buttonLabel': 'Save File',
+        'title': t('export'),
+        'buttonLabel': t('saveFile'),
         'filters': [
             {
-                'name': 'Text Files',
+                'name': t('logFiles'),
                 'extensions': ['log']
             }],
         'properties': []
@@ -335,6 +428,9 @@ class TeraProxyGUI {
     constructor() {
         this.window = null;
         this.tray = null;
+        this.skylight = false;
+        this.pendingLogs = [];
+        this.logTimer = null;
     }
 
     show() {
@@ -355,6 +451,8 @@ class TeraProxyGUI {
 
         global.TeraProxy.GUIMode = true;
         global.TeraProxy.DevMode = !!config.devmode;
+        const ui = resolveUI();
+        this.skylight = ui.skylight;
 
         if (!config.gui) {
             config.gui = {
@@ -362,8 +460,8 @@ class TeraProxyGUI {
                 theme: 'dark',
                 autostart: false,
                 logtimes: true,
-                width: 880,
-                height: 500,
+                width: ui.skylight ? 1280 : 880,
+                height: ui.skylight ? 768 : 500,
                 maximized: false,
                 loghtml: false
             };
@@ -397,29 +495,38 @@ class TeraProxyGUI {
         const guiRoot = path.join(__dirname, 'gui');
         const guiIcon = path.join(guiRoot, '/assets/icon.ico');
 
+        const size = ui.skylight ? require('./gui/ui-config').windowSizeOf(config, screen.getPrimaryDisplay().workAreaSize) : null;
         this.window = new BrowserWindow({
             title: 'TERA Toolbox',
-            width: config?.gui?.width || 743,
-            height: config?.gui?.height || 514,
-            minWidth: 743,
-            minHeight: 514,
+            width: size ? size.width : (config?.gui?.width || 743),
+            height: size ? size.height : (config?.gui?.height || 514),
+            minWidth: size ? size.minWidth : 743,
+            minHeight: size ? size.minHeight : 514,
             icon: guiIcon,
             frame: false,
-            backgroundColor: config.gui.theme === 'light' ? '#f5f5f5' : '#121212',
+            backgroundColor: ui.skylight ? (config.gui.theme === 'light' ? '#F5F6F8' : '#20242A') : (config.gui.theme === 'light' ? '#f5f5f5' : '#121212'),
             resizable: true,
             centered: true,
             show: false,
             webPreferences: {
                 nodeIntegration: true,
                 contextIsolation: false,
-                enableRemoteModule: true,
+                enableRemoteModule: !ui.skylight,
+                additionalArguments: ui.skylight ? [`--toolbox-language=${encodeURIComponent(languageOf(config.uilanguage))}`] : [],
                 devTools: false,
-                spellcheck: false
+                spellcheck: false,
+                // Keep the skylight video background running when the window loses focus.
+                backgroundThrottling: !ui.skylight
             }
         });
 
         // this.window.loadURL('http://localhost:8080/');
-        this.window.loadFile(path.join(guiRoot, 'main.html'));
+        this.window.loadFile(ui.main);
+        if (ui.skylight) {
+            attachUIWindow(this.window);
+            this.window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+            this.window.webContents.on('will-navigate', event => event.preventDefault());
+        }
         // this.window.webContents.openDevTools();
 
         this.window.once('ready-to-show', () => {
@@ -441,17 +548,20 @@ class TeraProxyGUI {
         });
 
         //this.window.on('minimize', () => { this.window.hide(); });
-        this.window.on('closed', () => { StopProxy(); this.window = null; });
+        this.window.on('closed', () => {
+            StopProxy();
+            this.window = null;
+            this.pendingLogs = [];
+            if (this.logTimer !== null) {
+                clearTimeout(this.logTimer);
+                this.logTimer = null;
+            }
+        });
 
         // Initialize tray icon
         this.tray = new Tray(guiIcon);
         this.tray.setToolTip('TERA Toolbox');
-        this.tray.setContextMenu(Menu.buildFromTemplate([
-            {
-                'label': mui.get('loader-gui/tray/quit'),
-                'click': () => this.close()
-            }
-        ]));
+        this.refreshTray();
 
         this.tray.on('click', () => {
             if (this.window)
@@ -479,7 +589,7 @@ class TeraProxyGUI {
 
         // Start periodic update check
         if (!config.noselfupdate) {
-            StartUpdateCheck((config.branch || 'master').toLowerCase(), () => {
+            StartUpdateCheck((config.branch || 'beta').toLowerCase(), () => {
                 if (this.window)
                     this.window.webContents.send('update available');
             });
@@ -498,6 +608,14 @@ class TeraProxyGUI {
                 });
             }
         });
+    }
+
+    refreshTray() {
+        if (!this.tray || this.trayLanguage === mui.language) return;
+        this.tray.setContextMenu(Menu.buildFromTemplate([
+            { label: mui.get('loader-gui/tray/quit'), click: () => this.close() }
+        ]));
+        this.trayLanguage = mui.language;
     }
 
     hide() {
@@ -527,14 +645,33 @@ class TeraProxyGUI {
     }
 
     log(msg, type = 'log') {
-        if (this.window)
+        if (!this.window) return;
+        if (!this.skylight) {
             this.window.webContents.send('log', msg, type);
+            return;
+        }
+        this.pendingLogs.push({ message: msg, type });
+        if (this.logTimer === null) this.logTimer = setTimeout(() => this.flushLogs(), 32);
+    }
+
+    flushLogs() {
+        this.logTimer = null;
+        if (!this.window || this.pendingLogs.length === 0) return;
+        const entries = this.pendingLogs;
+        this.pendingLogs = [];
+        this.window.webContents.send('log', entries);
     }
 }
 
 // Main
 let gui = null;
 let config = null;
+const attachUIWindow = require('./gui/ui-appearance').registerUI({
+    ipcMain, dialog, BrowserWindow, screen,
+    getWindow: () => gui && gui.window,
+    getConfig: () => config,
+    saveConfig: next => { SaveConfiguration(next); config = next; }
+});
 
 function showError(error) {
     console.error(error);

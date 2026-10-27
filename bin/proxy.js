@@ -47,7 +47,7 @@ function LoadProtocolMap(dataFolder, version) {
 }
 
 class TeraProxy {
-    constructor(modFolder, dataFolder, config) {
+    constructor(modFolder, dataFolder, config, onPreloadProgress) {
         this.modFolder = modFolder;
         this.dataFolder = dataFolder;
         this.config = config;
@@ -58,7 +58,7 @@ class TeraProxy {
 
         const ModManager = require('./mod-manager');
         this.modManager = new ModManager(this.modFolder);
-        this.modManager.loadAll();
+        this.modManager.loadAll(onPreloadProgress);
 
         const ConnectionManager = require('./connection-manager');
         this.connectionManager = new ConnectionManager(this.modManager);

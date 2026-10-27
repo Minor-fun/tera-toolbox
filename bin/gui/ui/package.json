@@ -1,0 +1,22 @@
+{
+  "name": "tera-toolbox-skylight-ui",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "vue-cli-service build && node scripts/asset-manifest.cjs",
+    "test": "node --test tests/*.test.cjs",
+    "check:distribution": "node scripts/check-distribution.cjs"
+  },
+  "dependencies": {
+    "dompurify": "3.4.17",
+    "vue": "2.7.14",
+    "vuetify": "2.7.0"
+  },
+  "devDependencies": {
+    "@mdi/js": "7.4.47",
+    "@vue/cli-service": "5.0.8",
+    "jsdom": "22.1.0",
+    "vue-template-compiler": "2.7.14"
+  },
+  "browserslist": ["Chrome 96"]
+}

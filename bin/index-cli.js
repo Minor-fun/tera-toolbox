@@ -91,7 +91,7 @@ process.on('uncaughtException', (e) => {
 });
 
 // Safely load configuration
-let branch = 'master';
+let branch = 'beta';
 let updatelog = false;
 let noselfupdate = false;
 

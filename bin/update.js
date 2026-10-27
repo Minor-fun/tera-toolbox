@@ -103,7 +103,20 @@ function checkModuleUpdateUrlBlacklist(update_url_root) {
     return !blacklist.some(name => update_url_root.toLowerCase().includes(`/${name}/`));
 }
 
-async function autoUpdateModule(name, root, updateData, updatelog, updatelimit, serverIndex = 0) {
+function reportProgress(callback, progress) {
+    // Observation must never turn a UI error into an update failure or retry.
+    if (typeof callback === 'function') {
+        try { callback(progress); } catch (_) {}
+    }
+}
+
+async function autoUpdateModule(name, root, updateData, updatelog, updatelimit, serverIndex = 0, onProgress) {
+    let active = true;
+    let filesCompleted = 0, filesTotal = 0;
+    const reportFile = file => {
+        if (active) reportProgress(onProgress, { file, filesCompleted, filesTotal });
+    };
+    reportFile('');
     try {
         // If only one file (module.json) exists, it's a fresh install
         if (walkdir(root, true, false).length === 1)
@@ -138,7 +151,10 @@ async function autoUpdateModule(name, root, updateData, updatelog, updatelimit, 
         }
 
         let promises = [];
+        filesTotal = Object.keys(manifest.files || {}).length;
+        reportFile('');
         for (let file in manifest.files) {
+            reportFile(file);
             let filepath = path.join(root, file);
             let filedata = manifest.files[file];
 
@@ -161,21 +177,31 @@ async function autoUpdateModule(name, root, updateData, updatelog, updatelimit, 
                 if (updatelog)
                     console.log(mui.get('update/module-download-file', { file }));
 
-                let promise = autoUpdateFile(file, filepath, file_url, updateData.drmKey, manifest.no_hash_verification ? null : expectedHash);
+                let promise = autoUpdateFile(file, filepath, file_url, updateData.drmKey, manifest.no_hash_verification ? null : expectedHash).then(result => {
+                    filesCompleted++;
+                    reportFile(file);
+                    return result;
+                });
                 promises.push(updatelimit ? (await promise) : promise);
+            } else {
+                filesCompleted++;
+                reportFile(file);
             }
         }
 
         return { results: updatelimit ? promises : (await Promise.all(promises)) };
     } catch (e) {
+        active = false;
         if (serverIndex + 1 < updateData.servers.length)
-            return autoUpdateModule(name, root, updateData, updatelog, updatelimit, serverIndex + 1);
+            return autoUpdateModule(name, root, updateData, updatelog, updatelimit, serverIndex + 1, onProgress);
         else
             return Promise.reject(e);
+    } finally {
+        active = false;
     }
 }
 
-async function autoUpdate(moduleBase, updatelog, updatelimit) {
+async function autoUpdate(moduleBase, updatelog, updatelimit, onProgress) {
     console.log(mui.get('update/started'));
     forcedirSync(moduleBase);
     await generateBlacklist();
@@ -184,17 +210,47 @@ async function autoUpdate(moduleBase, updatelog, updatelimit) {
     let legacyModules = [];
     let failedModules = [];
 
+    // Keep one entry per module even when dependencies or module.json trigger another pass.
+    const progressModules = new Map();
+    let currentKey = '', current = '';
+    let fileProgress = { file: '', filesCompleted: 0, filesTotal: 0 };
+    const report = () => {
+        if (typeof onProgress !== 'function') return;
+        const statuses = Array.from(progressModules.values());
+        const total = statuses.length, completed = statuses.filter(Boolean).length;
+        const fraction = progressModules.get(currentKey) === null && fileProgress.filesTotal ? fileProgress.filesCompleted / fileProgress.filesTotal : 0;
+        reportProgress(onProgress, { total, completed,
+            failed: statuses.filter(value => value === 'failed').length,
+            skipped: statuses.filter(value => value === 'skipped').length,
+            current: current.slice(0, 200), ...fileProgress,
+            fraction: total ? (completed + fraction) / total : 0 });
+    };
+    const discover = names => {
+        names.forEach(name => { const key = name.toLowerCase(); if (!progressModules.has(key)) progressModules.set(key, null); });
+        report();
+    };
+    const begin = (name, displayName = name) => {
+        currentKey = name.toLowerCase(); current = String(displayName);
+        fileProgress = { file: '', filesCompleted: 0, filesTotal: 0 };
+        report();
+    };
+    const finish = (name, status) => { progressModules.set(name.toLowerCase(), status); report(); };
+
     let installedModulesChanged;
     do {
         installedModulesChanged = false;
         let addedModules = [];
         const installedModuleInfos = listModuleInfos(moduleBase);
+        discover([...installedModuleInfos.map(mod => mod.name), ...Object.keys(CoreModules)]);
 
         for (let coreModule in CoreModules) {
             if (!installedModuleInfos.some(mod => mod.name === coreModule.toLowerCase()) && addedModules.indexOf(coreModule) < 0) {
+                begin(coreModule);
                 const coreModuleResult = await autoUpdateFile('module.json', path.join(moduleBase, coreModule, 'module.json'), CoreModules[coreModule]);
-                if (!coreModuleResult[1])
+                if (!coreModuleResult[1]) {
+                    finish(coreModule, 'failed');
                     throw new Error(`Unable to install core module "${coreModule}: ${coreModuleResult[2]}`);
+                }
                 console.log(mui.get('update/core-module-initialized', { coreModule }));
                 installedModulesChanged = true;
                 addedModules.push(coreModule);
@@ -202,11 +258,13 @@ async function autoUpdate(moduleBase, updatelog, updatelimit) {
         }
 
         for (let moduleInfo of installedModuleInfos) {
+            begin(moduleInfo.name, moduleInfo.rawName);
             // If the module isn't auto-update compatible, skip it
             if (moduleInfo.compatibility !== 'compatible') {
                 legacyModules.push({
                     name: moduleInfo.rawName
                 });
+                finish(moduleInfo.name, 'skipped');
 
                 continue;
             }
@@ -222,12 +280,17 @@ async function autoUpdate(moduleBase, updatelog, updatelimit) {
                         continue;
 
                     if (!installedModuleInfos.some(mod => mod.name === dependency.toLowerCase()) && addedModules.indexOf(dependency) < 0) {
+                        discover([dependency]);
+                        begin(dependency);
                         const dependency_result = await autoUpdateFile('module.json', path.join(moduleBase, dependency, 'module.json'), updateData["dependencies"][dependency]);
-                        if (!dependency_result[1])
+                        if (!dependency_result[1]) {
+                            finish(dependency, 'failed');
                             throw new Error(`Unable to install dependency module "${dependency}: ${dependency_result[2]}`);
+                        }
                         console.log(mui.get('update/dependency-module-initialized', { dependency, name: moduleInfo.rawName }));
                         installedModulesChanged = true;
                         addedModules.push(dependency);
+                        begin(moduleInfo.name, moduleInfo.rawName);
                     }
                 }
 
@@ -238,13 +301,17 @@ async function autoUpdate(moduleBase, updatelog, updatelimit) {
                     successModules.push({
                         name: moduleInfo.rawName
                     });
+                    finish(moduleInfo.name, 'skipped');
 
                     continue;
                 }
 
                 // Auto-update enabled or fresh install
                 try {
-                    const moduleConfig = await autoUpdateModule(moduleInfo.rawName, moduleInfo.path, updateData, updatelog, updatelimit);
+                    const moduleConfig = await autoUpdateModule(moduleInfo.rawName, moduleInfo.path, updateData, updatelog, updatelimit, 0, progress => {
+                        fileProgress = { ...progress, file: progress.file.slice(0, 200) };
+                        report();
+                    });
 
                     let failedFiles = [];
                     for (let result of moduleConfig["results"]) {
@@ -267,6 +334,7 @@ async function autoUpdate(moduleBase, updatelog, updatelimit) {
                         successModules.push({
                             name: moduleInfo.rawName
                         });
+                        finish(moduleInfo.name, 'done');
                     }
                 } catch (e) {
                     console.error(mui.get('update/module-update-failed-1', { name: moduleInfo.rawName }));
@@ -282,6 +350,7 @@ async function autoUpdate(moduleBase, updatelog, updatelimit) {
                     failedModules.push({
                         name: moduleInfo.rawName
                     });
+                    finish(moduleInfo.name, 'failed');
                 }
             } while (moduleConfigChanged);
         }
