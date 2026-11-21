@@ -35,6 +35,30 @@ function appearanceOf(config) {
     };
 }
 
+function serverProfilesOf(config) {
+    const profiles = config && config.gui && config.gui.serverProfiles;
+    const seen = new Set();
+    return (Array.isArray(profiles) ? profiles : []).filter(profile => {
+        if (!isRecord(profile) || !/^[a-f0-9]{32}$/.test(profile.id || '') || seen.has(profile.id)) return false;
+        seen.add(profile.id);
+        return true;
+    }).map(profile => ({
+        ...profile,
+        name: typeof profile.name === 'string' ? profile.name.trim().slice(0, 80) : '',
+        launcherPath: typeof profile.launcherPath === 'string' ? profile.launcherPath : '',
+        backgroundId: /^[a-f0-9]{32}$/.test(profile.backgroundId || '') ? profile.backgroundId : null
+    }));
+}
+
+function selectedServerOf(config) {
+    const profiles = serverProfilesOf(config);
+    return profiles.find(profile => profile.id === (config && config.gui && config.gui.selectedServerId)) || profiles[0] || null;
+}
+
+function backgroundReferences(config) {
+    return new Set([appearanceOf(config).background, ...serverProfilesOf(config).map(profile => profile.backgroundId)].filter(Boolean));
+}
+
 const defaultWindowSize = { width: 1280, height: 768 };
 
 function windowSizeOf(config, workArea) {
@@ -49,4 +73,4 @@ function windowSizeOf(config, workArea) {
     };
 }
 
-module.exports = { mergeConfig, appearanceOf, windowSizeOf, defaultWindowSize };
+module.exports = { mergeConfig, appearanceOf, windowSizeOf, defaultWindowSize, serverProfilesOf, selectedServerOf, backgroundReferences };

@@ -5,7 +5,7 @@ const { app, BrowserWindow, powerMonitor, Tray, Menu, ipcMain, shell, dialog, sc
 const DataFolder = path.join(__dirname, '..', 'data');
 const ModuleFolder = path.join(__dirname, '..', 'mods');
 const { resolveUI } = require('./gui/ui-resources');
-const { mergeConfig } = require('./gui/ui-config');
+const { mergeConfig, selectedServerOf } = require('./gui/ui-config');
 const uiChannels = require('./gui/ui-channels.json');
 const { translator, languageOf } = require('./gui/ui-i18n');
 
@@ -89,6 +89,9 @@ async function GetInstallableMods(forceRefresh = false) {
 // Proxy Main
 let proxy = null;
 let proxyRunning = false;
+let proxyStartSequence = 0;
+let gameLauncher = null;
+let serverUI = null;
 
 async function StartProxy(moduleFolder, proxyConfig, reportProgress) {
     const updateShare = proxyConfig.noupdate ? 0 : 45;
@@ -156,6 +159,8 @@ async function StartProxy(moduleFolder, proxyConfig, reportProgress) {
 }
 
 async function StopProxy() {
+    proxyStartSequence++;
+    if (gameLauncher) gameLauncher.cancel();
     if (!proxy || !proxyRunning)
         return false;
 
@@ -264,10 +269,15 @@ function reportStartupProgress(sender, phase, percent, progress) {
     }
 }
 
-async function requestProxyStart(event) {
-    if (proxyBusy || proxy || proxyRunning) return;
+async function requestProxyStart(event, options) {
+    if (proxyBusy || proxy || proxyRunning || (serverUI && serverUI.busy)) return;
     proxyBusy = true;
     event.sender.send('proxy starting');
+    const sequence = ++proxyStartSequence;
+    const selected = selectedServerOf(config);
+    const profile = options && options.launchGameLauncher === true && gui && gui.window &&
+        event.sender === gui.window.webContents && selected && selected.id === options.serverId ? { ...selected } : null;
+    const operation = gameLauncher.begin(profile);
     reportStartupProgress(event.sender, 'preparing', 0);
     console.log(mui.get('loader-gui/proxy-starting'));
     try {
@@ -279,6 +289,11 @@ async function requestProxyStart(event) {
         reportStartupProgress(event.sender, proxyRunning ? 'ready' : 'failed', proxyRunning ? 100 : startupProgress.percent);
         if (!event.sender.isDestroyed()) event.sender.send('proxy running', proxyRunning);
     }
+    if (profile && proxyRunning && sequence === proxyStartSequence) {
+        const startedProxy = proxy;
+        await gameLauncher.run(operation, () => sequence === proxyStartSequence && proxyRunning && proxy === startedProxy &&
+            gui && gui.window && event.sender === gui.window.webContents && !event.sender.isDestroyed());
+    } else if (profile && operation === gameLauncher.operation) gameLauncher.cancel();
 }
 
 ipcMain.on('init', (event, _) => {
@@ -288,6 +303,7 @@ ipcMain.on('init', (event, _) => {
     startupProgressSender = event.sender;
     startupProgressSentPhase = startupProgress.phase;
     event.sender.send(uiChannels.startupProgress, startupProgress);
+    event.sender.send(uiChannels.launcherStatus, gameLauncher.status);
     event.sender.send('is admin', global.TeraProxy.IsAdmin);
 
     if (config.noselfupdate) {
@@ -630,6 +646,7 @@ class TeraProxyGUI {
 
     close() {
         if (this.window !== null) {
+            gameLauncher.cancel();
             StopUpdateCheck();
 
             this.window.close();
@@ -671,6 +688,24 @@ const attachUIWindow = require('./gui/ui-appearance').registerUI({
     getWindow: () => gui && gui.window,
     getConfig: () => config,
     saveConfig: next => { SaveConfiguration(next); config = next; }
+});
+gameLauncher = new (require('./gui/game-launcher').GameLauncher)({
+    onStatus: status => {
+        if (gui && gui.window && !gui.window.isDestroyed() && !gui.window.webContents.isDestroyed()) gui.window.webContents.send(uiChannels.launcherStatus, status);
+        const key = { opened: 'launcherOpened', 'game-running': 'launcherGameRunning',
+            'already-running': 'launcherAlreadyRunning', unconfigured: 'launcherUnconfigured', failed: status.error }[status.status];
+        if (key) {
+            const t = translator(config && config.uilanguage);
+            const message = t(key, { serverName: status.serverName || t('serverDefault') });
+            if (status.status === 'failed') console.warn(message); else console.log(message);
+        }
+    }
+});
+serverUI = require('./gui/game-servers').registerServers({
+    ipcMain, dialog, getWindow: () => gui && gui.window, getConfig: () => config,
+    saveConfig: next => { SaveConfiguration(next); config = next; },
+    isBusy: () => proxyBusy || gameLauncher.busy || attachUIWindow.mediaBusy,
+    onSave: () => { if (attachUIWindow.prune) attachUIWindow.prune(); }
 });
 
 function showError(error) {

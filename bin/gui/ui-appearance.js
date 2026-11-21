@@ -5,7 +5,8 @@ const path = require('path');
 const crypto = require('crypto');
 const { pathToFileURL } = require('url');
 const channels = require('./ui-channels.json');
-const { mergeConfig, appearanceOf, windowSizeOf } = require('./ui-config');
+const { mergeConfig, appearanceOf, windowSizeOf, serverProfilesOf, selectedServerOf, backgroundReferences } = require('./ui-config');
+const { translator } = require('./ui-i18n');
 
 const assetRoot = path.resolve(__dirname, '../../.ui-assets');
 const extensions = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.mp4']);
@@ -63,10 +64,11 @@ class MediaStore {
     }
 
     prune(keep) {
+        const retained = keep instanceof Set ? keep : new Set(Array.isArray(keep) ? keep : [keep]);
         try {
             if (!fs.existsSync(this.root) || fs.lstatSync(this.root).isSymbolicLink()) return;
             fs.readdirSync(this.root).forEach(id => {
-                if (assetId.test(id) && id !== keep) this.remove(id);
+                if (assetId.test(id) && !retained.has(id)) this.remove(id);
             });
         } catch (_) { /* Cleanup must not invalidate a successfully saved background. */ }
     }
@@ -141,7 +143,7 @@ function windowState(window) {
     };
 }
 
-function describeBackground(config, store) {
+function describeGlobalBackground(config, store) {
     const appearance = appearanceOf(config);
     if (appearance.background) return store.describe(appearance.background);
     if (appearance.defaultBackground !== 'video') return null;
@@ -151,8 +153,34 @@ function describeBackground(config, store) {
         preview: pathToFileURL(path.join(assets, 'skylight-default-poster.jpg')).href };
 }
 
+function describeBackground(config, store, failed = []) {
+    const selected = selectedServerOf(config);
+    if (selected && selected.backgroundId && !failed.includes(selected.backgroundId)) {
+        const media = store.describe(selected.backgroundId);
+        if (media && !media.missing && media.kind === 'image') return media;
+    }
+    const media = describeGlobalBackground(config, store);
+    return media && (media.missing || failed.includes(media.id)) ? null : media;
+}
+
+function backgroundSnapshot(config, store, failed = []) {
+    const selected = selectedServerOf(config);
+    const serverMedia = selected && selected.backgroundId ? store.describe(selected.backgroundId) : null;
+    const globalMedia = describeGlobalBackground(config, store);
+    return {
+        media: describeBackground(config, store, failed),
+        globalMedia: globalMedia && failed.includes(globalMedia.id) ? { ...globalMedia, missing: true } : globalMedia,
+        serverBackgroundMissing: !!(selected && selected.backgroundId &&
+            (!serverMedia || serverMedia.missing || serverMedia.kind !== 'image' || failed.includes(selected.backgroundId)))
+    };
+}
+
 function registerUI({ ipcMain, dialog, BrowserWindow, screen, getWindow, getConfig, saveConfig, store = new MediaStore(assetRoot, (file, kind) => decodeMedia(BrowserWindow, file, kind)) }) {
-    let importing = false;
+    let importing = false, pruneRequested = false;
+    const prune = () => {
+        if (importing) { pruneRequested = true; return; }
+        store.prune(backgroundReferences(getConfig()));
+    };
     const owns = event => getWindow() && event.sender === getWindow().webContents;
     ipcMain.handle(channels.windowState, event => windowState(owns(event) ? getWindow() : null));
     ipcMain.on(channels.maximize, event => {
@@ -185,39 +213,66 @@ function registerUI({ ipcMain, dialog, BrowserWindow, screen, getWindow, getConf
     });
     ipcMain.handle(channels.background, async (event, request = {}) => {
         if (!owns(event)) return { error: 'background-denied' };
-        if (request.action === 'get') return { media: describeBackground(getConfig(), store) };
+        if (!request || typeof request !== 'object' || Array.isArray(request)) return { error: 'background-type' };
+        const targeted = request.serverId !== undefined;
+        const server = targeted && serverProfilesOf(getConfig()).find(profile => profile.id === request.serverId);
+        if (targeted && !server) return { error: 'background-target' };
+        if (request.action === 'get') {
+            if (targeted) return { media: server.backgroundId ? store.describe(server.backgroundId) : null };
+            if (request.scope === 'global') return { media: describeGlobalBackground(getConfig(), store) };
+            return backgroundSnapshot(getConfig(), store, Array.isArray(request.failed) ? request.failed : []);
+        }
         if (!['import', 'reset', 'preset'].includes(request.action) ||
+            (targeted && request.action === 'preset') ||
             (request.action === 'preset' && !['image', 'video'].includes(request.preset))) return { error: 'background-type' };
         if (importing) return { busy: true };
         importing = true;
-        let id = null;
+        let id = null, saved = false;
         try {
             if (request.action === 'import') {
+                const t = translator(getConfig() && getConfig().uilanguage);
                 const result = await dialog.showOpenDialog(getWindow(), {
+                    title: t(targeted ? 'serverBackground' : 'background'), buttonLabel: t('selectFile'),
                     properties: ['openFile'],
-                    filters: [{ name: 'PNG / JPEG / WebP / GIF / MP4', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'mp4'] }]
+                    filters: [targeted ? { name: 'PNG / JPEG / WebP', extensions: ['png', 'jpg', 'jpeg', 'webp'] } :
+                        { name: 'PNG / JPEG / WebP / GIF / MP4', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'mp4'] }]
                 });
                 if (result.canceled || !result.filePaths.length) return { cancelled: true };
+                if (targeted && validateFile(result.filePaths[0]).kind !== 'image') fail('type');
                 id = await store.importFile(result.filePaths[0]);
+                if (targeted && store.describe(id).kind !== 'image') fail('type');
             }
             if (!owns(event) || event.sender.isDestroyed()) {
                 if (id) store.remove(id);
                 return { cancelled: true };
             }
-            const appearance = { background: id };
-            if (request.action !== 'import') appearance.defaultBackground = request.action === 'preset' ? request.preset : 'image';
-            const next = mergeConfig(getConfig(), { gui: { appearance } });
+            let patch;
+            if (targeted) {
+                const profiles = serverProfilesOf(getConfig());
+                const target = profiles.find(profile => profile.id === request.serverId);
+                if (!target) { if (id) store.remove(id); return { error: 'background-target' }; }
+                target.backgroundId = id;
+                patch = { gui: { serverProfiles: profiles } };
+            } else {
+                const appearance = { background: id };
+                if (request.action !== 'import') appearance.defaultBackground = request.action === 'preset' ? request.preset : 'image';
+                patch = { gui: { appearance } };
+            }
+            const next = mergeConfig(getConfig(), patch);
             saveConfig(next);
+            saved = true;
             event.sender.send('set config', next);
-            store.prune(id);
-            return { media: describeBackground(next, store) };
+            return backgroundSnapshot(next, store);
         } catch (error) {
             if (id) store.remove(id);
             return { error: `background-${['size', 'type', 'decode'].includes(error.code) ? error.code : 'failed'}` };
-        } finally { importing = false; }
+        } finally {
+            importing = false;
+            if (saved || pruneRequested) { pruneRequested = false; prune(); }
+        }
     });
 
-    return function attachWindow(window) {
+    const attachWindow = function(window) {
         // Keep resizable/maximizable enabled for native maximize and title-bar double-click.
         // Electron emits will-resize for manual edge dragging, not setBounds/setSize.
         const preventResize = event => event.preventDefault();
@@ -232,14 +287,17 @@ function registerUI({ ipcMain, dialog, BrowserWindow, screen, getWindow, getConf
             window.removeListener('will-resize', preventResize);
         });
     };
+    attachWindow.prune = prune;
+    Object.defineProperty(attachWindow, 'mediaBusy', { get: () => importing });
+    return attachWindow;
 }
 
-function splashAppearance(config) {
+function splashAppearance(config, store = new MediaStore()) {
     const appearance = appearanceOf(config);
-    const media = describeBackground(config, new MediaStore());
+    const media = describeBackground(config, store);
     return { theme: config && config.gui && config.gui.theme === 'light' ? 'light' : 'dark',
         reducedMotion: appearance.reducedMotion, backgroundDim: appearance.backgroundDim, backgroundOpacity: appearance.backgroundOpacity,
         preview: media && !media.missing ? media.preview : null };
 }
 
-module.exports = { MediaStore, validateFile, decodeMedia, registerUI, windowState, splashAppearance };
+module.exports = { MediaStore, validateFile, decodeMedia, registerUI, windowState, splashAppearance, describeBackground, describeGlobalBackground };

@@ -1,7 +1,7 @@
 <template>
   <v-app :class="{ 'reduce-motion': reduced }" :style="appearanceStyle">
     <div class="toolbox-window" :class="{ 'nav-expanded': appearance.sidebarExpanded, 'on-tool-page': page !== 'home', 'video-background': videoBackground, 'acrylic-enabled': acrylicEnabled }">
-      <BackgroundLayer :media="state.media" :window-visible="state.windowVisible" @failed="mediaFailed = true" />
+      <BackgroundLayer :media="state.media" :window-visible="state.windowVisible" @failed="backgroundFailed" />
       <div class="page-background-overlay" :class="{ 'page-acrylic': acrylicEnabled }" aria-hidden="true"></div>
       <aside ref="navigation" class="navigation-rail">
         <span v-show="indicatorTop !== null" class="navigation-indicator" :style="{ transform: 'translateY(' + indicatorTop + 'px)' }" aria-hidden="true"></span>
@@ -22,12 +22,12 @@
         <div v-if="!state.config" class="empty-state loading-app"><v-progress-circular indeterminate size="32" width="2" /><p dir="auto">{{ t('loading') }}</p></div>
         <main v-else class="page-container">
           <div v-if="state.updateAvailable && page !== 'home'" class="global-update"><Icon name="download" />{{ t('update') }}</div>
-          <transition name="page" :css="!reduced"><component :is="pages[page]" :key="page" :store="store" :state="state" :t="t" :search-request="searchRequest" :reduced="reduced" :system-reduced="systemReduced" :media-failed="mediaFailed" @appearance-preview="appearancePreview = $event" @navigate="navigate" @help="helpOpen = true" @confirm="confirmation = $event" /></transition>
+          <transition name="page" :css="!reduced"><component :is="pages[page]" :key="page" v-bind="page === 'settings' ? { initialGroup: settingsGroup } : {}" :store="store" :state="state" :t="t" :search-request="searchRequest" :reduced="reduced" :system-reduced="systemReduced" :media-failed="mediaFailed" @appearance-preview="appearancePreview = $event" @navigate="navigate" @help="helpOpen = true" @confirm="confirmation = $event" /></transition>
         </main>
       </div>
     </div>
     <v-dialog transition="toolbox-dialog" :value="!!confirmation" max-width="460" @input="!$event && (confirmation = null)"><section class="dialog-panel"><h2>{{ confirmationCopy.title }}</h2><p dir="auto">{{ confirmationCopy.text }}</p><div class="dialog-actions"><button class="quiet-button" :disabled="!confirmation" @click="confirmation = null">{{ t('cancel') }}</button><button class="solid-button" :disabled="!confirmation" @click="confirmAction">{{ t('confirm') }}</button></div></section></v-dialog>
-    <v-dialog transition="toolbox-dialog" :value="!!state.error" max-width="480" @input="!$event && (state.error = '')"><section class="dialog-panel"><h2>{{ t('error') }}</h2><p dir="auto">{{ state.error.startsWith('background-') || state.error.startsWith('window-') ? t(state.error) : state.error }}</p><div class="dialog-actions"><button class="solid-button" @click="state.error = ''">{{ t('ok') }}</button></div></section></v-dialog>
+    <v-dialog transition="toolbox-dialog" :value="!!state.error" max-width="480" @input="!$event && (state.error = '')"><section class="dialog-panel"><h2>{{ t('error') }}</h2><p dir="auto">{{ /^(background|window|server|launcher)-/.test(state.error) ? t(state.error) : state.error }}</p><div class="dialog-actions"><button class="solid-button" @click="state.error = ''">{{ t('ok') }}</button></div></section></v-dialog>
     <v-dialog transition="toolbox-dialog" v-model="helpOpen" max-width="510">
       <section class="dialog-panel help-panel">
         <div class="help-brand"><img :src="'../assets/icon.ico'" alt=""><div><h2>{{ t('appName') }} <span class="beta-tag">Beta</span></h2></div></div>
@@ -52,7 +52,7 @@ const motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
 const initialLanguage = languageFromArguments(window.process && window.process.argv);
 export default {
     components: { BackgroundLayer, Icon, ProxyButton }, props: { store: Object },
-    data() { return { state: this.store.state, page: 'home', pages: { home: HomePage, plugins: ModsPage, logs: LogsPage, settings: SettingsPage }, systemReduced: motionQuery.matches, searchRequest: 0, helpOpen: false, confirmation: null, confirmationCopy: {}, mediaFailed: false, appearancePreview: {}, indicatorTop: null }; },
+    data() { return { state: this.store.state, page: 'home', settingsGroup: 'appearance', pages: { home: HomePage, plugins: ModsPage, logs: LogsPage, settings: SettingsPage }, systemReduced: motionQuery.matches, searchRequest: 0, helpOpen: false, confirmation: null, confirmationCopy: {}, mediaFailed: false, appearancePreview: {}, indicatorTop: null }; },
     computed: {
         appearance() { return { ...appearanceOf(this.state.config), ...this.appearancePreview }; },
         reduced() { return this.systemReduced || this.appearance.reducedMotion; },
@@ -88,7 +88,8 @@ export default {
             // Local offsets stay correct during the window's scale-in animation.
             if (selected) this.indicatorTop = selected.offsetTop + (selected.offsetHeight - 18) / 2;
         },
-        navigate(page) { this.page = page; },
+        navigate(page, group = 'appearance') { this.settingsGroup = group; this.page = page; },
+        backgroundFailed() { this.mediaFailed = true; this.store.mediaFailed(); },
         toggleNavigation() { this.store.save({ gui: { appearance: { sidebarExpanded: !this.appearance.sidebarExpanded } } }); },
         motionChanged(event) { this.systemReduced = event.matches; },
         enableUpdate(key) {
@@ -97,7 +98,7 @@ export default {
         },
         keydown(event) {
             if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f') { event.preventDefault(); this.page = 'logs'; this.searchRequest++; }
-            if (event.key === 'Escape' && !this.confirmation && !this.helpOpen && !this.state.error) this.state.logUI.query = '';
+            if (event.key === 'Escape' && !this.confirmation && !this.helpOpen && !this.state.error && !document.querySelector('.v-menu__content.menuable__content__active')) this.state.logUI.query = '';
         },
         confirmAction() { if (!this.confirmation) return; const action = this.confirmation.action; this.confirmation = null; action(); }
     }

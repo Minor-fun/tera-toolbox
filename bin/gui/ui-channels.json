@@ -3,5 +3,7 @@
   "maximize": "ui maximize",
   "windowState": "ui window state",
   "windowSize": "ui window size",
-  "startupProgress": "ui startup progress"
+  "startupProgress": "ui startup progress",
+  "serverProfiles": "ui server profiles",
+  "launcherStatus": "ui game launcher status"
 }

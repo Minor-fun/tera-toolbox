@@ -1,6 +1,6 @@
 <template>
   <section class="page tool-page logs-page" :aria-label="t('logs')">
-    <div class="page-heading"><h1>{{ t('logs') }}</h1><span class="muted">{{ t('logCount', { count: layout.length }) }}</span></div>
+    <div class="page-heading"><div class="logs-heading-copy"><h1>{{ t('logs') }}</h1><span class="muted">{{ t('logCount', { count: layout.length }) }}</span></div><button class="quiet-button" @click="store.send('folder')"><Icon name="folder" />{{ t('folder') }}</button></div>
     <div class="surface log-surface">
       <div class="log-toolbar">
         <label class="search-field log-search"><Icon name="search" /><input ref="search" v-model="state.logUI.query" :placeholder="t('searchLogs')" :aria-label="t('searchLogs')" @keydown="searchKey"><span v-if="state.logUI.query" class="search-count">{{ matches.length ? current + 1 : 0 }}/{{ matches.length }}{{ matches.length === 50000 ? '+' : '' }}</span></label>

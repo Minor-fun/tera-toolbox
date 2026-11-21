@@ -12,7 +12,9 @@
           <div class="status-line"><span class="status-dot" :class="{ running: state.running, busy: state.transition }"></span><span>{{ t(state.transition || (state.running ? 'running' : 'stopped')) }}</span></div>
           <h1 v-if="!state.running && !state.transition">{{ t('ready') }}</h1>
           <div class="configuration-count" :title="t('configurationOnly')"><span>{{ t('installedCount', { count: state.mods.length }) }}</span><span class="small-divider"></span><span>{{ t('enabledCount', { count: enabled }) }}</span></div>
-          <p dir="auto" class="home-hint">{{ t(state.transition ? state.transition + 'Hint' : state.running ? 'runningHint' : 'stoppedHint') }}</p>
+          <p dir="auto" class="home-hint">{{ t(state.transition ? state.transition + 'Hint' : state.running ? server ? 'launcherReadyHint' : 'runningHint' : 'stoppedHint') }}</p>
+          <p v-if="server" dir="auto" class="home-launcher-hint" :class="{ caution: launcherWarning }" role="status">{{ launcherHint }}</p>
+          <p v-if="state.serverBackgroundMissing" dir="auto" class="home-launcher-hint caution">{{ t('serverBackgroundMissing') }}</p>
         </div>
         <div class="recent-heading"><button ref="drawerToggle" class="text-button recent-toggle" :aria-expanded="logsOpen" aria-controls="home-recent-drawer" @click="logsOpen = !logsOpen">{{ t('recent') }}<Icon name="right" /></button><button class="text-button" @click="$emit('navigate', 'logs')">{{ t('allLogs') }}<Icon name="right" /></button></div>
         <transition name="log-drawer" :css="!reduced">
@@ -35,7 +37,8 @@
         <div v-if="progress.updateError || progress.update && progress.update.failed" class="preload-counts caution update-failures"><span>{{ progress.updateError ? t('updateError') : t('updateFailed', progress.update) }}</span></div>
       </section>
       <section class="home-actions">
-        <ProxyButton :store="store" :state="state" :t="t" />
+        <ServerSelector v-if="server" badge :store="store" :state="state" :t="t" :reduced="reduced" />
+        <ProxyButton home :store="store" :state="state" :t="t" />
       </section>
     </div>
   </section>
@@ -43,10 +46,28 @@
 <script>
 import Icon from '../components/Icon.vue';
 import ProxyButton from '../components/ProxyButton.vue';
+import ServerSelector from '../components/ServerSelector.vue';
+import { selectedServerOf } from '../../../ui-config';
 export default {
-    components: { Icon, ProxyButton }, props: { store: Object, state: Object, t: Function, reduced: Boolean },
+    components: { Icon, ProxyButton, ServerSelector }, props: { store: Object, state: Object, t: Function, reduced: Boolean },
     data() { return { followLogs: true, logsOpen: this.state.transition === 'starting' || this.state.startupProgress.phase === 'failed' }; },
     computed: {
+        server() { return selectedServerOf(this.state.config); },
+        launcherWarning() {
+            return this.server && this.state.launcherStatus.serverId === this.server.id &&
+                ['failed', 'unconfigured'].includes(this.state.launcherStatus.status);
+        },
+        launcherHint() {
+            const values = { serverName: this.server && this.server.name || this.t('serverDefault') };
+            if (!this.state.running) return this.t(this.server && this.server.launcherPath ? 'launcherAfterStartup' : 'launcherUnconfigured', values);
+            const status = this.state.launcherStatus;
+            const key = status.serverId === (this.server && this.server.id) && {
+                pending: 'launcherAfterStartup', checking: 'launcherChecking', launching: 'launcherOpening',
+                opened: 'launcherOpened', 'already-running': 'launcherAlreadyRunning', 'game-running': 'launcherGameRunning',
+                unconfigured: 'launcherUnconfigured', failed: status.error, cancelled: 'launcherCancelled'
+            }[status.status];
+            return this.t(key || 'launcherRunningHint', values);
+        },
         progress() { return this.state.startupProgress; },
         currentPlugin() { return this.progress.phase === 'updating' ? this.progress.update && this.progress.update.current : this.progress.phase === 'preloading' ? this.progress.current : ''; },
         enabled() { return this.state.mods.filter(mod => !mod.disabled).length; },

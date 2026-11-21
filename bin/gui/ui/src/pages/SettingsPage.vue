@@ -13,7 +13,7 @@
             <SettingRow id="theme" :label="t('theme')"><div class="segmented theme-selector"><button :class="{ selected: state.config.gui.theme === 'light' }" :aria-pressed="state.config.gui.theme === 'light'" @click="store.save({ gui: { theme: 'light' } })"><Icon name="light" />{{ t('light') }}</button><button :class="{ selected: state.config.gui.theme !== 'light' }" :aria-pressed="state.config.gui.theme !== 'light'" @click="store.save({ gui: { theme: 'dark' } })"><Icon name="dark" />{{ t('dark') }}</button></div></SettingRow>
             <div class="background-setting">
               <div class="background-preview"><img :src="preview" alt="" @error="$event.target.src = './assets/backgrounds/skylight-default.png'"><Icon name="image" /></div>
-              <div><h3>{{ t('background') }}</h3><p dir="auto">{{ t('backgroundHint') }}</p><p v-if="mediaFailed || state.media && state.media.missing" dir="auto" class="caution">{{ t('missingBackground') }}</p><p v-else dir="auto" class="muted">{{ t(appearance.background ? 'customBackground' : 'defaultBackground') }}</p>
+              <div><h3>{{ t('background') }}</h3><p dir="auto">{{ t('backgroundHint') }}</p><p v-if="state.globalMedia && state.globalMedia.missing" dir="auto" class="caution">{{ t('missingBackground') }}</p><p v-else dir="auto" class="muted">{{ t(appearance.background ? 'customBackground' : 'defaultBackground') }}</p>
                 <div class="background-actions">
                   <button v-for="preset in ['image', 'video']" :key="preset" class="quiet-button" :class="{ selected: backgroundChoice === preset }" :data-background-preset="preset" :aria-pressed="backgroundChoice === preset" :disabled="state.mediaBusy" @click="store.background('preset', preset)">{{ t(preset === 'video' ? 'defaultVideo' : 'defaultImage') }}</button>
                   <button class="solid-button" :disabled="state.mediaBusy" @click="store.background('import')"><Icon name="image" />{{ t(state.mediaBusy ? 'importing' : 'import') }}</button>
@@ -29,6 +29,29 @@
             <SettingRow id="reducedMotion" :label="t('reducedMotion')" :hint="t('reducedMotionHint') + (systemReduced ? ' ' + t('systemMotion') : '')" :value="appearance.reducedMotion" @change="saveAppearance('reducedMotion', $event)" />
           </template>
           <template v-else>
+            <div v-if="group === 'game'" class="server-management">
+              <div class="server-management-heading"><h3>{{ t('servers') }}</h3><button type="button" class="quiet-button" :disabled="serverDisabled" @click="manageServer('add')">{{ t('addServer') }}</button></div>
+              <p dir="auto" class="group-hint">{{ t('serversHint') }}</p>
+              <ServerSelector :store="store" :state="state" :t="t" :before-select="saveName" :name-saving="!!nameSave" />
+              <p v-if="!server" dir="auto" class="group-hint">{{ t('noServersHint') }}</p>
+              <template v-else>
+                <SettingRow id="server-name" class="server-field" :label="t('serverName')" :hint="t('serverNameHint')">
+                  <input id="server-name" v-model="nameDraft" class="server-input" type="text" dir="auto" maxlength="80" required :disabled="serverDisabled" @blur="saveName" @keydown.enter.prevent="saveName">
+                </SettingRow>
+                <SettingRow id="launcher-path" class="server-field launcher-setting" :label="t('launcherPath')" :hint="t('launcherPathHint')">
+                  <div class="launcher-path-control"><input id="launcher-path" class="server-input" type="text" readonly dir="ltr" :value="server.launcherPath" :title="server.launcherPath" :placeholder="t('noLauncherPath')">
+                    <div class="background-actions"><button type="button" class="quiet-button" :disabled="serverDisabled" @click="manageServer('choose-launcher')"><Icon name="folder" />{{ t('chooseLauncher') }}</button><button type="button" class="quiet-button" :disabled="serverDisabled || !server.launcherPath" @click="manageServer('clear-launcher')">{{ t('clearLauncher') }}</button></div>
+                  </div>
+                </SettingRow>
+                <div class="background-setting server-background-setting">
+                  <div class="background-preview"><img :src="serverPreviewSource" alt="" @error="serverPreviewFailed = true"><Icon name="image" /></div>
+                  <div><h3>{{ t('serverBackground') }}</h3><p dir="auto">{{ t('serverBackgroundHint') }}</p><p v-if="server.backgroundId && (serverPreviewFailed || serverPreview && serverPreview.missing || state.serverBackgroundMissing)" dir="auto" class="caution">{{ t('serverBackgroundMissing') }}</p><p v-else dir="auto" class="muted">{{ t(server.backgroundId ? 'customBackground' : 'useGlobalBackground') }}</p>
+                    <div class="background-actions"><button type="button" class="quiet-button" :disabled="serverDisabled" @click="serverBackground('import')">{{ t('chooseServerImage') }}</button><button type="button" class="quiet-button" :disabled="serverDisabled || !server.backgroundId" @click="serverBackground('reset')">{{ t('useGlobalBackground') }}</button></div>
+                  </div>
+                </div>
+                <div class="server-management-footer"><button type="button" class="quiet-button danger-text" :disabled="serverDisabled" @click="removeServer"><Icon name="trash" />{{ t('removeServer') }}</button></div>
+              </template>
+            </div>
             <p v-if="group === 'startup' || group === 'updates'" dir="auto" class="group-hint">{{ t(group === 'startup' ? 'startupHint' : 'updateHint') }}</p>
             <SettingRow v-for="field in fields[group]" :key="field.key" :id="field.key" :label="t(field.key)" :hint="field.key === 'loghtml' ? t('rawHTMLHint') : ''" :value="!!(field.gui ? state.config.gui[field.key] : state.config[field.key])" @change="saveField(field, $event)" />
             <SettingRow v-if="group === 'startup'" id="startupSound" :label="t('startupSound')" :hint="t('startupSoundHint')" :value="state.config.gui.startupSound !== false" @change="store.save({ gui: { startupSound: $event } })" />
@@ -54,11 +77,13 @@
 <script>
 import Icon from '../components/Icon.vue';
 import SettingRow from '../components/SettingRow.vue';
-import { appearanceOf, defaultWindowSize } from '../../../ui-config';
+import ServerSelector from '../components/ServerSelector.vue';
+import { appearanceOf, defaultWindowSize, selectedServerOf } from '../../../ui-config';
 export default {
-    components: { Icon, SettingRow }, props: { store: Object, state: Object, t: Function, reduced: Boolean, systemReduced: Boolean, mediaFailed: Boolean },
-    data: () => ({
-        group: 'appearance', groups: ['appearance', 'startup', 'logs', 'updates', 'game'], languages: window.languageNames || { en: 'English', zh: '简体中文' }, draft: {},
+    components: { Icon, SettingRow, ServerSelector }, props: { store: Object, state: Object, t: Function, reduced: Boolean, systemReduced: Boolean, mediaFailed: Boolean, initialGroup: String },
+    data() { return {
+        group: this.initialGroup || 'appearance', groups: ['appearance', 'startup', 'logs', 'updates', 'game'], languages: window.languageNames || { en: 'English', zh: '简体中文' }, draft: {},
+        nameDraft: '', savedName: '', nameSave: null, serverPreview: null, serverPreviewFailed: false, serverPreviewSequence: 0,
         sizeDraft: { ...defaultWindowSize }, defaultSize: defaultWindowSize, sizeLimits: {}, sizeReady: false,
         fields: {
             startup: [{ key: 'autostart', gui: true }, { key: 'minimizetotray', gui: true }, { key: 'devmode' }],
@@ -66,9 +91,19 @@ export default {
             updates: [{ key: 'updatelog' }, { key: 'noupdate' }, { key: 'noselfupdate' }],
             game: [{ key: 'noslstags' }, { key: 'removecounters' }, { key: 'noserverautojoin' }]
         }
-    }),
-    watch: { group(value) { if (value === 'startup') this.loadSize(); } },
+    }; },
+    watch: {
+        group(value) { if (value === 'startup') this.loadSize(); if (value === 'game') this.loadServerPreview(); },
+        server: { immediate: true, handler(value, previous) {
+            if (!previous || !value || previous.id !== value.id || this.nameDraft === this.savedName || this.nameDraft.trim() === value.name) this.nameDraft = value && value.name || '';
+            this.savedName = value && value.name || '';
+            if (this.group === 'game' && (!previous || !value || previous.id !== value.id || previous.backgroundId !== value.backgroundId)) this.loadServerPreview();
+        } }
+    },
     computed: {
+        server() { return selectedServerOf(this.state.config); },
+        serverDisabled() { return !!((this.state.serverBusy && !this.nameSave) || this.state.mediaBusy || this.state.transition || this.state.launcherBusy); },
+        serverPreviewSource() { return this.serverPreview && !this.serverPreview.missing && !this.serverPreviewFailed ? this.serverPreview.preview : this.preview; },
         appearance() { return { ...appearanceOf(this.state.config), ...this.draft }; },
         backgroundChoice() { return this.appearance.background ? 'custom' : this.appearance.defaultBackground; },
         opacityControls() {
@@ -77,11 +112,41 @@ export default {
                 ...['backgroundDim', 'frameOpacity', 'backgroundOpacity', 'panelOpacity'].map(key => ({ key, min: 0 }))
             ];
         },
-        preview() { return this.state.media && !this.state.media.missing && !this.mediaFailed ? this.state.media.preview : './assets/backgrounds/skylight-default.png'; }
+        preview() { return this.state.globalMedia && !this.state.globalMedia.missing ? this.state.globalMedia.preview : './assets/backgrounds/skylight-default.png'; }
     },
     mounted() { this.store.send('getConfig'); },
-    beforeDestroy() { this.$emit('appearance-preview', {}); },
+    beforeDestroy() { this.serverPreviewSequence++; this.$emit('appearance-preview', {}); },
     methods: {
+        async saveName() {
+            if (this.nameSave) return this.nameSave;
+            if (!this.server || this.nameDraft.trim() === this.server.name || this.serverDisabled) return null;
+            this.nameSave = this.store.server('rename', this.server.id, this.nameDraft);
+            try { return await this.nameSave; } finally { this.nameSave = null; }
+        },
+        async manageServer(action) {
+            const renamed = await this.saveName();
+            if (renamed && (renamed.error || renamed.busy)) return;
+            return this.store.server(action, this.server && this.server.id);
+        },
+        async removeServer() {
+            const renamed = await this.saveName();
+            if (!this.server || renamed && (renamed.error || renamed.busy)) return;
+            const server = { ...this.server };
+            this.$emit('confirm', { title: this.t('removeServer'), text: this.t('removeServerQuestion', { serverName: server.name }), action: () => this.store.server('remove', server.id) });
+        },
+        async loadServerPreview() {
+            const sequence = ++this.serverPreviewSequence;
+            this.serverPreview = null; this.serverPreviewFailed = false;
+            if (!this.server || !this.server.backgroundId) return;
+            const result = await this.store.backgroundPreview(this.server.id);
+            if (sequence === this.serverPreviewSequence) this.serverPreview = result && result.media || null;
+        },
+        async serverBackground(action) {
+            const renamed = await this.saveName();
+            if (!this.server || renamed && (renamed.error || renamed.busy)) return;
+            await this.store.background(action, undefined, this.server.id);
+            this.loadServerPreview();
+        },
         async loadSize() {
             const result = await this.store.windowSize('get');
             if (!result || result.error) return;

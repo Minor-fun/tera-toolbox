@@ -17,6 +17,8 @@ for (const asset of ['skylight-default.png', 'skylight-default.mp4', 'skylight-d
 assert.ok(!files.includes('success.mp3'), 'The audio source must stay in the UI source assets directory.');
 assert.ok(fs.readFileSync(path.join(root, 'bin/gui/ui/src/assets/audio/success.mp3')).equals(fs.readFileSync(path.join(root, 'bin/gui/skylight/media/success.mp3'))));
 assert.ok(files.includes('bin/gui/ui-appearance.js'));
+for (const helper of ['game-launcher', 'game-servers'])
+    assert.ok(files.includes(`bin/gui/${helper}.js`), `Missing server runtime module: ${helper}`);
 assert.ok(files.includes('bin/gui/ui-i18n.js'), 'The shared translator must be distributed.');
 for (const language of languages) assert.ok(files.includes(`bin/gui/locales/${language}.json`), `Missing runtime locale: ${language}`);
 for (const language of bundledMuiLocales)
