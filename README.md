@@ -3,8 +3,8 @@ Windows x64 TERA Toolbox with the Skylight interface. Development and updates us
 
 ## Download
 
-- [Portable GUI](https://github.com/Minor-fun/tera-toolbox/releases): Electron included.
-- [Source code (beta)](https://github.com/Minor-fun/tera-toolbox/tree/beta): Electron is not included in source downloads.
+- [Portable GUI](https://github.com/mods-for-me/tera-toolbox/releases): Electron included.
+- [Source code (beta)](https://github.com/mods-for-me/tera-toolbox/tree/beta): Electron is not included in source downloads.
 
 ## Run
 
