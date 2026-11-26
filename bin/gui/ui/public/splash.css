@@ -13,7 +13,6 @@ header img { width: 26px; height: 26px; }
 .status h1 { font-size: 16px; line-height: 1.6; font-weight: 500; margin: 14px 0 4px; }
 .status p { margin: 0; min-height: 20px; font-size: 12px; overflow-wrap: anywhere; opacity: .75; max-height: 64px; overflow: hidden; }
 .indeterminate { position: relative; height: 3px; overflow: hidden; background: rgba(130, 170, 190, .2); border-radius: 3px; }
-.indeterminate::after { content: ""; position: absolute; width: 36%; height: 100%; background: var(--accent); border-radius: 3px; animation: loading 1.6s ease-in-out infinite; }
-@keyframes loading { from { transform: translateX(-110%); } to { transform: translateX(290%); } }
-.reduced .indeterminate::after { animation: none; width: 100%; opacity: .5; }
-@media (prefers-reduced-motion: reduce) { .indeterminate::after { animation: none; width: 100%; opacity: .5; } }
+.indeterminate::after { content: ""; position: absolute; left: 0; top: 0; width: 42%; height: 100%; background: linear-gradient(90deg, transparent, var(--accent), transparent); border-radius: 3px; animation: loading 1.4s cubic-bezier(.22, 1, .36, 1) infinite; }
+@keyframes loading { from { transform: translateX(-110%); } to { transform: translateX(260%); } }
+.reduced .indeterminate::after { animation: none; width: 100%; opacity: .5; background: var(--accent); }

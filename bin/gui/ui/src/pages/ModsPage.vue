@@ -4,10 +4,10 @@
     <div class="surface mods-surface">
       <div class="mods-toolbar">
         <div class="segmented" role="tablist" :aria-label="t('plugins')">
-          <button role="tab" :aria-selected="tab === 'installed'" :class="{ selected: tab === 'installed' }" @click="selectTab('installed')">{{ t('installed') }} <span>{{ state.mods.length }}</span></button>
-          <button role="tab" :aria-selected="tab === 'browse'" :class="{ selected: tab === 'browse' }" @click="selectTab('browse')">{{ t('browse') }}</button>
+          <button role="tab" :aria-selected="tab === 'installed'" :class="{ selected: tab === 'installed' }" @click="selectTab('installed')"><Icon name="plugins" />{{ t('installed') }}<span>{{ state.mods.length }}</span></button>
+          <button role="tab" :aria-selected="tab === 'browse'" :class="{ selected: tab === 'browse' }" @click="selectTab('browse')"><Icon name="download" />{{ t('browse') }}<span v-if="state.availableLoaded">{{ state.available.length }}</span></button>
         </div>
-        <button class="icon-button" :title="t('refresh')" :aria-label="t('refresh')" :disabled="state.modBusy" @click="refresh"><Icon name="refresh" /></button>
+        <button class="icon-button mods-refresh" :title="t('refresh')" :aria-label="t('refresh')" :disabled="state.modBusy" @click="refresh"><Icon name="refresh" :class="{ 'button-spinner': state.modBusy }" /></button>
       </div>
       <div class="filter-row">
         <label class="search-field"><Icon name="search" /><input v-model="query" :placeholder="t('searchPlugins')" :aria-label="t('searchPlugins')"><button v-if="query" class="icon-button" :aria-label="t('clear')" @click="query = ''"><Icon name="close" /></button></label>
@@ -24,7 +24,8 @@
             <div class="plugin-copy">
               <div class="plugin-heading">
                 <h2 class="plugin-name" :title="displayName(mod)">{{ displayName(mod) }}</h2>
-                <span v-if="mod.version" class="plugin-version" :title="t('version') + ': ' + mod.version">{{ mod.version }}</span>
+                <span v-if="mod.version" class="plugin-version" :class="{ 'is-date': isDateVersion(mod.version) }" :title="t(isDateVersion(mod.version) ? 'updatedAt' : 'version') + ': ' + mod.version">{{ mod.version }}</span>
+                <span v-if="pluginDate(mod)" class="plugin-date" :title="t('updatedAt') + ': ' + pluginDate(mod)">{{ pluginDate(mod) }}</span>
                 <span v-if="mod.author" class="plugin-author" :title="t('author') + ': ' + mod.author">{{ mod.author }}</span>
                 <span v-if="mod.isCoreModule" class="tag core-tag">{{ t('core') }}</span>
                 <span v-else-if="mod.compatibility === 'legacy'" class="tag" :title="t('legacyHint')">{{ t('legacy') }}</span>
@@ -33,7 +34,7 @@
             </div>
             <div class="plugin-actions">
               <label v-if="tab === 'installed' && !mod.isCoreModule && mod.compatibility === 'compatible'" class="plugin-action plugin-toggle" :class="{ 'is-on': !mod.disabled, 'control-disabled': !canAct(mod, 'toggle', state) }" :title="t('enablePlugin') + ': ' + t(mod.disabled ? 'disabled' : 'enabled') + '\n' + t('applyNext')">
-                <input class="plugin-enable" type="checkbox" :checked="!mod.disabled" :disabled="!canAct(mod, 'toggle', state)" :aria-label="displayName(mod) + ' ' + t('enablePlugin')" @change="store.act(mod, 'toggle')"><Icon name="power" /><Icon v-if="!mod.disabled" class="toggle-check" name="check" />
+                <input class="plugin-enable" type="checkbox" :checked="!mod.disabled" :disabled="!canAct(mod, 'toggle', state)" :aria-label="displayName(mod) + ' ' + t('enablePlugin')" @change="store.act(mod, 'toggle')"><Icon :name="mod.disabled ? 'powerOff' : 'power'" />
               </label>
               <button v-if="mod.readmePath" class="plugin-action plugin-readme" :title="t('readme')" :aria-label="displayName(mod) + ' ' + t('readme')" @click="store.send('readme', mod.readmePath)"><Icon name="info" /></button>
               <button v-if="mod.supportUrl" class="plugin-action" :title="t('support')" :aria-label="displayName(mod) + ' ' + t('support')" @click="store.openLink(mod.supportUrl)"><Icon name="link" /></button>
@@ -55,6 +56,15 @@
 <script>
 import Icon from '../components/Icon.vue';
 import { displayName, canAct } from '../core/controller';
+function isDateVersion(value) {
+    const text = typeof value === 'string' ? value.trim() : '';
+    return /^(?:\d{1,2}[/-]\d{1,2}[/-]\d{4}|\d{4}[/.-]\d{1,2}[/.-]\d{1,2})$/.test(text);
+}
+function pluginDate(mod) {
+    const raw = mod && (mod.updateDate || mod.updatedAt || mod.updated || mod.lastUpdated || mod.date);
+    const text = typeof raw === 'string' ? raw.trim() : '';
+    return text && text !== String(mod && mod.version || '').trim() ? text : '';
+}
 export default {
     components: { Icon }, props: { store: Object, state: Object, t: Function, reduced: Boolean },
     data: () => ({ tab: 'installed', category: 'all', query: '' }),
@@ -67,14 +77,14 @@ export default {
                 if (this.category === 'legacy' && mod.compatibility !== 'legacy') return false;
                 if (this.category === 'core' && !mod.isCoreModule) return false;
                 if (['network', 'client'].includes(this.category) && !keywords.includes(this.category)) return false;
-                const text = [displayName(mod), mod.name, mod.author, mod.description, ...keywords].join(' ').toLocaleLowerCase();
+                const text = [displayName(mod), mod.name, mod.author, mod.description, mod.version, pluginDate(mod), ...keywords].join(' ').toLocaleLowerCase();
                 return !queries.length || queries.some(query => text.includes(query));
             });
         }
     },
     mounted() { this.store.send('mods'); },
     methods: {
-        displayName, canAct,
+        displayName, canAct, isDateVersion, pluginDate,
         refresh() { this.store.send(this.tab === 'installed' ? 'mods' : 'available'); },
         selectTab(tab) { this.tab = tab; this.category = 'all'; this.refresh(); },
         askUninstall(mod) { this.$emit('confirm', { title: this.t('uninstall'), text: this.t('uninstallQuestion', { name: displayName(mod) }), action: () => this.store.act(mod, 'uninstall') }); }

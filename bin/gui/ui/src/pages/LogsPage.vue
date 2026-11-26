@@ -21,7 +21,7 @@
           <div v-for="row in visibleRows" :key="row.entry.id" :data-log-id="row.entry.id" :class="['log-entry', 'log-' + row.entry.type]" :style="{ top: row.top + 'px', minHeight: row.height + 'px' }" v-html="renderRow(row.entry)"></div>
         </div>
       </div>
-      <div class="log-footer"><span>{{ state.logUI.paused ? t('pause') : t('resume') }}</span><span v-if="dropped" class="caution">{{ t('dropped', { count: dropped }) }}</span><span v-else>Ctrl+F · Enter · Shift+Enter · Esc</span></div>
+      <div class="log-footer"><span class="log-footer-status"><span class="status-dot" :class="{ running: !state.logUI.paused, busy: state.logUI.paused }" aria-hidden="true"></span>{{ state.logUI.paused ? t('pause') : t('resume') }}</span><span v-if="dropped" class="caution">{{ t('dropped', { count: dropped }) }}</span><span v-else>Ctrl+F · Enter · Shift+Enter · Esc</span></div>
     </div>
   </section>
 </template>

@@ -2,7 +2,7 @@
   <section class="page tool-page settings-page" :aria-label="t('settings')">
     <div class="page-heading"><h1>{{ t('settings') }}</h1><button class="quiet-button" @click="$emit('help')"><Icon name="help" />{{ t('help') }}</button></div>
     <div class="settings-layout">
-      <nav class="settings-categories" :aria-label="t('settings')"><button v-for="item in groups" :key="item" :class="{ selected: group === item }" :aria-current="group === item ? 'page' : null" @click="group = item">{{ t(item) }}<Icon name="right" /></button></nav>
+      <nav class="surface settings-categories" :aria-label="t('settings')"><button v-for="item in groups" :key="item" :class="{ selected: group === item }" :aria-current="group === item ? 'page' : null" @click="group = item">{{ t(item) }}<Icon name="right" /></button></nav>
       <select class="settings-category-select" v-model="group" :aria-label="t('settings')"><option v-for="item in groups" :key="item" :value="item">{{ t(item) }}</option></select>
       <div class="settings-scroll">
         <transition name="content" :css="!reduced">
@@ -26,7 +26,7 @@
             <SettingRow v-for="field in opacityControls" :key="field.key" :id="field.key" :label="t(field.key)" :hint="t(field.key + 'Hint')">
               <div class="range-control"><input :id="field.key" type="range" :min="field.min" max="100" step="1" :value="Math.round(appearance[field.key] * 100)" @input="previewAppearance(field.key, Number($event.target.value) / 100)" @change="saveAppearance(field.key, Number($event.target.value) / 100)"><output :for="field.key">{{ Math.round(appearance[field.key] * 100) }}%</output></div>
             </SettingRow>
-            <SettingRow id="reducedMotion" :label="t('reducedMotion')" :hint="t('reducedMotionHint') + (systemReduced ? ' ' + t('systemMotion') : '')" :value="appearance.reducedMotion" @change="saveAppearance('reducedMotion', $event)" />
+            <SettingRow id="reducedMotion" :label="t('reducedMotion')" :hint="t('reducedMotionHint')" :value="appearance.reducedMotion" @change="saveAppearance('reducedMotion', $event)" />
           </template>
           <template v-else>
             <div v-if="group === 'game'" class="server-management">
@@ -80,7 +80,7 @@ import SettingRow from '../components/SettingRow.vue';
 import ServerSelector from '../components/ServerSelector.vue';
 import { appearanceOf, defaultWindowSize, selectedServerOf } from '../../../ui-config';
 export default {
-    components: { Icon, SettingRow, ServerSelector }, props: { store: Object, state: Object, t: Function, reduced: Boolean, systemReduced: Boolean, mediaFailed: Boolean, initialGroup: String },
+    components: { Icon, SettingRow, ServerSelector }, props: { store: Object, state: Object, t: Function, reduced: Boolean, mediaFailed: Boolean, initialGroup: String },
     data() { return {
         group: this.initialGroup || 'appearance', groups: ['appearance', 'startup', 'logs', 'updates', 'game'], languages: window.languageNames || { en: 'English', zh: '简体中文' }, draft: {},
         nameDraft: '', savedName: '', nameSave: null, serverPreview: null, serverPreviewFailed: false, serverPreviewSequence: 0,

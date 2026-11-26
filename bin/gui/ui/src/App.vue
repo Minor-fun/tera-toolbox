@@ -22,7 +22,7 @@
         <div v-if="!state.config" class="empty-state loading-app"><v-progress-circular indeterminate size="32" width="2" /><p dir="auto">{{ t('loading') }}</p></div>
         <main v-else class="page-container">
           <div v-if="state.updateAvailable && page !== 'home'" class="global-update"><Icon name="download" />{{ t('update') }}</div>
-          <transition name="page" :css="!reduced"><component :is="pages[page]" :key="page" v-bind="page === 'settings' ? { initialGroup: settingsGroup } : {}" :store="store" :state="state" :t="t" :search-request="searchRequest" :reduced="reduced" :system-reduced="systemReduced" :media-failed="mediaFailed" @appearance-preview="appearancePreview = $event" @navigate="navigate" @help="helpOpen = true" @confirm="confirmation = $event" /></transition>
+          <transition name="page" :css="!reduced"><component :is="pages[page]" :key="page" v-bind="page === 'settings' ? { initialGroup: settingsGroup } : {}" :store="store" :state="state" :t="t" :search-request="searchRequest" :reduced="reduced" :media-failed="mediaFailed" @appearance-preview="appearancePreview = $event" @navigate="navigate" @help="helpOpen = true" @confirm="confirmation = $event" /></transition>
         </main>
       </div>
     </div>
@@ -48,14 +48,13 @@ import LogsPage from './pages/LogsPage.vue';
 import SettingsPage from './pages/SettingsPage.vue';
 import { appearanceOf } from '../../ui-config';
 import { translator, languageFromArguments, htmlLanguage } from './core/i18n';
-const motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
 const initialLanguage = languageFromArguments(window.process && window.process.argv);
 export default {
     components: { BackgroundLayer, Icon, ProxyButton }, props: { store: Object },
-    data() { return { state: this.store.state, page: 'home', settingsGroup: 'appearance', pages: { home: HomePage, plugins: ModsPage, logs: LogsPage, settings: SettingsPage }, systemReduced: motionQuery.matches, searchRequest: 0, helpOpen: false, confirmation: null, confirmationCopy: {}, mediaFailed: false, appearancePreview: {}, indicatorTop: null }; },
+    data() { return { state: this.store.state, page: 'home', settingsGroup: 'appearance', pages: { home: HomePage, plugins: ModsPage, logs: LogsPage, settings: SettingsPage }, searchRequest: 0, helpOpen: false, confirmation: null, confirmationCopy: {}, mediaFailed: false, appearancePreview: {}, indicatorTop: null }; },
     computed: {
         appearance() { return { ...appearanceOf(this.state.config), ...this.appearancePreview }; },
-        reduced() { return this.systemReduced || this.appearance.reducedMotion; },
+        reduced() { return this.appearance.reducedMotion; },
         videoBackground() { return !!(this.state.media && this.state.media.kind === 'video' && !this.state.media.missing && !this.mediaFailed); },
         acrylicEnabled() { return this.appearance.pageAcrylic && !this.videoBackground; },
         appearanceStyle() {
@@ -78,9 +77,9 @@ export default {
         this.navigationObserver = new ResizeObserver(this.updateNavigationIndicator);
         this.navigationObserver.observe(this.$refs.navigation);
         this.updateNavigationIndicator();
-        motionQuery.addEventListener('change', this.motionChanged); window.addEventListener('keydown', this.keydown); this.store.connect();
+        window.addEventListener('keydown', this.keydown); this.store.connect();
     },
-    beforeDestroy() { this.navigationObserver.disconnect(); motionQuery.removeEventListener('change', this.motionChanged); window.removeEventListener('keydown', this.keydown); this.store.dispose(); },
+    beforeDestroy() { this.navigationObserver.disconnect(); window.removeEventListener('keydown', this.keydown); this.store.dispose(); },
     methods: {
         updateNavigationIndicator() {
             const rail = this.$refs.navigation;
@@ -91,7 +90,6 @@ export default {
         navigate(page, group = 'appearance') { this.settingsGroup = group; this.page = page; },
         backgroundFailed() { this.mediaFailed = true; this.store.mediaFailed(); },
         toggleNavigation() { this.store.save({ gui: { appearance: { sidebarExpanded: !this.appearance.sidebarExpanded } } }); },
-        motionChanged(event) { this.systemReduced = event.matches; },
         enableUpdate(key) {
             if (!this.state.config || !this.state.config[key]) return;
             this.store.save({ [key]: false });
