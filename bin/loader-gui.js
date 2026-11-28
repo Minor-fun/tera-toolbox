@@ -4,6 +4,23 @@ const exec = require('child_process').exec;
 const { app, BrowserWindow, powerMonitor, Tray, Menu, ipcMain, shell, dialog, screen } = require('electron');
 const DataFolder = path.join(__dirname, '..', 'data');
 const ModuleFolder = path.join(__dirname, '..', 'mods');
+
+// Splash screen loads ./gui/* before self-update writes new files; drop stale cached helpers before importing them here.
+function clearStaleGuiCache() {
+    if (!require.cache || typeof require.resolve !== 'function') return;
+    const guiDir = (path.join(__dirname, 'gui') + path.sep).toLowerCase();
+    for (const cached of Object.keys(require.cache)) {
+        if (cached.toLowerCase().startsWith(guiDir)) delete require.cache[cached];
+    }
+    for (const id of [
+        './utils', './gui/ui-resources', './gui/ui-config', './gui/ui-channels.json',
+        './gui/ui-i18n', './gui/ui-appearance', './gui/ui-theme', './gui/game-launcher', './gui/game-servers'
+    ]) {
+        try { delete require.cache[require.resolve(id)]; } catch (_) {}
+    }
+}
+clearStaleGuiCache();
+
 const { resolveUI } = require('./gui/ui-resources');
 const { mergeConfig, selectedServerOf } = require('./gui/ui-config');
 const uiChannels = require('./gui/ui-channels.json');
@@ -512,6 +529,10 @@ class TeraProxyGUI {
         const guiIcon = path.join(guiRoot, '/assets/icon.ico');
 
         const size = ui.skylight ? require('./gui/ui-config').windowSizeOf(config, screen.getPrimaryDisplay().workAreaSize) : null;
+        const uiAppearance = ui.skylight ? require('./gui/ui-appearance') : null;
+        const skylightBackground = uiAppearance && typeof uiAppearance.windowBackgroundColor === 'function'
+            ? uiAppearance.windowBackgroundColor(config)
+            : (config.gui.theme === 'dark' ? '#20242a' : '#f5f6f8');
         this.window = new BrowserWindow({
             title: 'TERA Toolbox',
             width: size ? size.width : (config?.gui?.width || 743),
@@ -520,7 +541,7 @@ class TeraProxyGUI {
             minHeight: size ? size.minHeight : 514,
             icon: guiIcon,
             frame: false,
-            backgroundColor: ui.skylight ? require('./gui/ui-appearance').windowBackgroundColor(config) : (config.gui.theme === 'light' ? '#f5f5f5' : '#121212'),
+            backgroundColor: ui.skylight ? skylightBackground : (config.gui.theme === 'light' ? '#f5f5f5' : '#121212'),
             resizable: true,
             centered: true,
             show: false,
@@ -731,18 +752,22 @@ process.on('warning', (warning) => {
 module.exports = function StartGUI() {
     return new Promise((resolve, reject) => {
         const { initGlobalSettings } = require('./utils');
+        const boot = () => {
+            try {
+                gui.show();
+                resolve();
+            } catch (error) {
+                reject(error);
+            }
+        };
         initGlobalSettings(false).then(() => {
             // Boot GUI
             gui = new TeraProxyGUI;
 
             if (app.isReady()) {
-                gui.show();
-                resolve();
+                boot();
             } else {
-                app.on('ready', () => {
-                    gui.show();
-                    resolve();
-                });
+                app.on('ready', boot);
             }
 
             app.on('second-instance', () => {
@@ -758,6 +783,6 @@ module.exports = function StartGUI() {
             app.on('activate', () => {
                 gui.show();
             });
-        });
+        }).catch(reject);
     });
 };

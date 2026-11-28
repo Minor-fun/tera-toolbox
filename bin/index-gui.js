@@ -66,14 +66,26 @@ function showSplashScreen() {
     }
 }
 
+function closeSplashScreen() {
+    if (SplashScreen) {
+        SplashScreen.close();
+        SplashScreen = null;
+    }
+}
+
+function reportStartupError(error) {
+    closeSplashScreen();
+    showDialog({
+        type: 'error',
+        title: t('error'),
+        message: `${t('fullErrorMessage')}\n${error && (error.stack || error)}\n\n${t('programTerminated')}`
+    });
+    app.exit(1);
+}
+
 function hideSplashScreen(onDone) {
     setTimeout(() => {
-        onDone().then(() => {
-            if (SplashScreen) {
-                SplashScreen.close();
-                SplashScreen = null;
-            }
-        });
+        Promise.resolve().then(onDone).then(closeSplashScreen, reportStartupError);
     }, SplashScreen ? Math.max(0, 1500 - (Date.now() - SplashScreenShowTime)) : 0);
 }
 
@@ -87,6 +99,13 @@ function setSplashScreenInfo(info) {
     SplashInfo = info;
     if (SplashScreen)
         SplashScreen.webContents.send('info', info);
+}
+
+function clearUpdatedModuleCache() {
+    if (!require.cache || typeof require.resolve !== 'function') return;
+    for (const id of ['./config', './utils', './loader-gui', './update-electron.js', './gui/ui-resources', './gui/ui-i18n', './gui/ui-appearance']) {
+        try { delete require.cache[require.resolve(id)]; } catch (_) {}
+    }
 }
 
 // Update
@@ -213,8 +232,10 @@ async function updateSelf() {
     const filesChanged = await updater.run();
     if (errors.length > 0)
         return errors;
-    if (filesChanged)
+    if (filesChanged) {
+        clearUpdatedModuleCache();
         return await updateSelf();
+    }
     return null;
 }
 
@@ -226,7 +247,7 @@ async function run() {
 
 function main() {
     if (noselfupdate) {
-        run();
+        run().catch(reportStartupError);
     } else {
         // Show splash screen
         showSplashScreen();
