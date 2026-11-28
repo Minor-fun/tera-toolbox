@@ -30,7 +30,7 @@
           <strong class="startup-percent">{{ progress.percent }}<span>%</span></strong>
         </div>
         <div class="startup-track" :class="{ 'startup-failed': progress.phase === 'failed' }" role="progressbar" :aria-label="t('startupProgress')" aria-valuemin="0" aria-valuemax="100" :aria-valuenow="progress.percent" :aria-valuetext="progress.percent + '% ' + t('startup-' + progress.phase)">
-          <div class="startup-fill" :style="{ width: progress.percent + '%' }"></div>
+          <div class="startup-fill" :class="{ 'is-empty': progress.percent <= 0 }" :style="{ width: progress.percent + '%' }"></div>
         </div>
         <div v-if="progress.total !== undefined" class="preload-counts"><span>{{ t('preloadCount', progress) }}</span><span>{{ t('preloadLoaded', progress) }}</span><span v-if="progress.failed" class="danger-text">{{ t('preloadFailed', progress) }}</span><span v-if="progress.skipped" class="caution">{{ t('preloadSkipped', progress) }}</span></div>
         <div v-if="progress.phase === 'updating' && progress.update" class="preload-counts update-counts"><span>{{ t('updateCount', progress.update) }}</span><span v-if="progress.update.filesTotal" :title="progress.update.file">{{ t('updateFiles', progress.update) }}</span><span v-if="progress.update.skipped">{{ t('updateSkipped', progress.update) }}</span></div>

@@ -1,5 +1,7 @@
 'use strict';
 
+const { normalizeAccentColor } = require('./ui-theme');
+
 const blockedKeys = new Set(['__proto__', 'constructor', 'prototype']);
 const isRecord = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 
@@ -31,7 +33,8 @@ function appearanceOf(config) {
         pageSemiTransparent: typeof value.pageSemiTransparent === 'boolean' ? value.pageSemiTransparent : true,
         pageOpacity: clamp(value.pageOpacity, 0.7, 0.1, 1),
         frameOpacity: clamp(value.frameOpacity, 0, 0, 1),
-        panelOpacity: clamp(value.panelOpacity, 0.5, 0, 1)
+        panelOpacity: clamp(value.panelOpacity, 0.5, 0, 1),
+        accentColor: normalizeAccentColor(value.accentColor)
     };
 }
 

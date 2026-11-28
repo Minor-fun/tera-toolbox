@@ -473,7 +473,7 @@ class TeraProxyGUI {
         if (!config.gui) {
             config.gui = {
                 enabled: true,
-                theme: 'dark',
+                theme: 'light',
                 autostart: false,
                 logtimes: true,
                 width: ui.skylight ? 1280 : 880,
@@ -520,7 +520,7 @@ class TeraProxyGUI {
             minHeight: size ? size.minHeight : 514,
             icon: guiIcon,
             frame: false,
-            backgroundColor: ui.skylight ? (config.gui.theme === 'light' ? '#F5F6F8' : '#20242A') : (config.gui.theme === 'light' ? '#f5f5f5' : '#121212'),
+            backgroundColor: ui.skylight ? require('./gui/ui-appearance').windowBackgroundColor(config) : (config.gui.theme === 'light' ? '#f5f5f5' : '#121212'),
             resizable: true,
             centered: true,
             show: false,

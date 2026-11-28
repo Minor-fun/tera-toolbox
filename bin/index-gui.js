@@ -37,7 +37,7 @@ function showSplashScreen() {
             minHeight: 400,
             icon: guiIcon,
             frame: false,
-            backgroundColor: appearance ? (appearance.theme === 'light' ? '#F5F6F8' : '#20242A') : '#1e1e1e',
+            backgroundColor: appearance ? (appearance.base || '#20242A') : '#1e1e1e',
             resizable: false,
             show: false,
             webPreferences: {

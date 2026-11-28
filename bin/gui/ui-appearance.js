@@ -6,6 +6,7 @@ const crypto = require('crypto');
 const { pathToFileURL } = require('url');
 const channels = require('./ui-channels.json');
 const { mergeConfig, appearanceOf, windowSizeOf, serverProfilesOf, selectedServerOf, backgroundReferences } = require('./ui-config');
+const { themeTokensOf } = require('./ui-theme');
 const { translator } = require('./ui-i18n');
 
 const assetRoot = path.resolve(__dirname, '../../.ui-assets');
@@ -295,9 +296,17 @@ function registerUI({ ipcMain, dialog, BrowserWindow, screen, getWindow, getConf
 function splashAppearance(config, store = new MediaStore()) {
     const appearance = appearanceOf(config);
     const media = describeBackground(config, store);
-    return { theme: config && config.gui && config.gui.theme === 'light' ? 'light' : 'dark',
+    const theme = config && config.gui && config.gui.theme;
+    const legacyTheme = theme === undefined || theme === null || theme === 'light' ? 'light' : 'dark';
+    return { theme: legacyTheme, base: themeTokensOf(appearance.accentColor, legacyTheme).base,
+        accentColor: appearance.accentColor,
         reducedMotion: appearance.reducedMotion, backgroundDim: appearance.backgroundDim, backgroundOpacity: appearance.backgroundOpacity,
         preview: media && !media.missing ? media.preview : null };
 }
 
-module.exports = { MediaStore, validateFile, decodeMedia, registerUI, windowState, splashAppearance, describeBackground, describeGlobalBackground };
+function windowBackgroundColor(config) {
+    const appearance = appearanceOf(config);
+    return themeTokensOf(appearance.accentColor, config && config.gui && config.gui.theme).base;
+}
+
+module.exports = { MediaStore, validateFile, decodeMedia, registerUI, windowState, splashAppearance, windowBackgroundColor, describeBackground, describeGlobalBackground };

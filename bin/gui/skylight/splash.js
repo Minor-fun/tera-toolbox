@@ -3,6 +3,7 @@
 const { ipcRenderer } = require('electron');
 const { TeraToolboxMUI } = require('tera-toolbox-mui');
 const { translator, languageFromArguments, htmlLanguage } = require('../ui-i18n');
+const { themeTokensOf } = require('../ui-theme');
 const language = languageFromArguments(process.argv);
 const t = translator(language, TeraToolboxMUI);
 document.documentElement.lang = htmlLanguage(language);
@@ -11,8 +12,14 @@ document.querySelector('[role="progressbar"]').setAttribute('aria-label', t('spl
 const argument = process.argv.find(value => value.startsWith('--toolbox-appearance='));
 try {
     const appearance = argument ? JSON.parse(decodeURIComponent(argument.slice('--toolbox-appearance='.length))) : {};
-    document.body.classList.toggle('light', appearance.theme === 'light');
+    const theme = themeTokensOf(appearance.accentColor, appearance.theme);
     document.body.classList.toggle('reduced', appearance.reducedMotion === true);
+    document.body.style.setProperty('--accent', theme.accent);
+    document.body.style.setProperty('--surface', theme.surfaceRgb);
+    document.body.style.setProperty('--text', theme.text);
+    document.body.style.setProperty('--border', theme.border);
+    document.body.style.color = theme.text;
+    document.body.style.backgroundColor = theme.base;
     if (Number.isFinite(appearance.backgroundDim)) document.body.style.setProperty('--dim', Math.max(0, Math.min(1, appearance.backgroundDim)));
     if (Number.isFinite(appearance.backgroundOpacity)) document.body.style.setProperty('--background-opacity', Math.max(0, Math.min(1, appearance.backgroundOpacity)));
     if (typeof appearance.preview === 'string' && appearance.preview.startsWith('file:')) document.getElementById('background').src = appearance.preview;

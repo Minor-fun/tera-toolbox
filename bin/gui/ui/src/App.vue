@@ -47,6 +47,7 @@ import ModsPage from './pages/ModsPage.vue';
 import LogsPage from './pages/LogsPage.vue';
 import SettingsPage from './pages/SettingsPage.vue';
 import { appearanceOf } from '../../ui-config';
+import { themeTokensOf } from '../../ui-theme';
 import { translator, languageFromArguments, htmlLanguage } from './core/i18n';
 const initialLanguage = languageFromArguments(window.process && window.process.argv);
 export default {
@@ -56,12 +57,40 @@ export default {
         appearance() { return { ...appearanceOf(this.state.config), ...this.appearancePreview }; },
         reduced() { return this.appearance.reducedMotion; },
         videoBackground() { return !!(this.state.media && this.state.media.kind === 'video' && !this.state.media.missing && !this.mediaFailed); },
-        acrylicEnabled() { return this.appearance.pageAcrylic && !this.videoBackground; },
+        acrylicEnabled() { return this.appearance.pageAcrylic; },
+        themeTokens() {
+            return themeTokensOf(this.appearance.accentColor, this.state.config && this.state.config.gui.theme);
+        },
         appearanceStyle() {
+            const theme = this.themeTokens;
             return {
+                '--color-scheme': theme.colorScheme,
                 '--background-dim': this.appearance.backgroundDim, '--background-opacity': this.appearance.backgroundOpacity,
                 '--page-opacity': this.appearance.pageSemiTransparent ? this.appearance.pageOpacity : 1,
-                '--frame-opacity': this.appearance.frameOpacity, '--panel-opacity': this.appearance.panelOpacity
+                '--frame-opacity': this.appearance.frameOpacity, '--panel-opacity': this.appearance.panelOpacity,
+                '--base': theme.base, '--surface-rgb': theme.surfaceRgb, '--rail-rgb': theme.railRgb,
+                '--scene-wash': theme.sceneWash, '--text': theme.text, '--muted': theme.muted,
+                '--border': theme.border, '--hover': theme.hover,
+                '--control-bg': theme.controlBg, '--control-hover': theme.controlHover,
+                '--control-track': theme.controlTrack, '--control-input': theme.controlInput,
+                '--progress-track': theme.progressTrack,
+                '--chrome-fill': theme.chromeFill, '--chrome-ink': theme.chromeInk, '--chrome-border': theme.chromeBorder,
+                '--chrome-hover': theme.chromeHover, '--chrome-active': theme.chromeActive,
+                '--nav-active-bg': theme.navActiveBg, '--nav-active-ink': theme.navActiveInk,
+                '--accent': theme.accent, '--accent-fill': theme.accentFill, '--accent-ink': theme.accentInk,
+                '--selected': theme.selected, '--control-selected': theme.controlSelected,
+                '--green': theme.green, '--warning': theme.warning, '--danger': theme.danger,
+                '--author': theme.author, '--author-bg': theme.authorBg,
+                '--version': theme.version, '--version-bg': theme.versionBg,
+                '--date': theme.date, '--date-bg': theme.dateBg,
+                '--control-on': theme.controlOn, '--control-on-hover': theme.controlOnHover,
+                '--update-action': theme.updateAction, '--control-update': theme.controlUpdate, '--control-update-hover': theme.controlUpdateHover,
+                '--control-danger': theme.controlDanger, '--control-danger-hover': theme.controlDangerHover,
+                '--core-tag': theme.coreTag, '--core-tag-bg': theme.coreTagBg,
+                '--install-action': theme.installAction, '--install-fill': theme.installFill, '--install-ink': theme.installInk, '--control-install': theme.controlInstall,
+                '--mark-bg': theme.markBg, '--mark-ink': theme.markInk,
+                '--mark-active-bg': theme.markActiveBg, '--mark-active-ink': theme.markActiveInk, '--mark-active-outline': theme.markActiveOutline,
+                '--rail-icon-shadow': theme.railIconShadow, '--server-mgmt-bg': theme.serverMgmtBg
             };
         },
         t() { return translator(this.state.config && this.state.config.uilanguage || initialLanguage, window.TeraToolboxMUI); }
@@ -70,7 +99,8 @@ export default {
         page() { this.$nextTick(this.updateNavigationIndicator); },
         // Retain only display text during dismissal, never a stale confirmation action.
         confirmation(value) { if (value) this.confirmationCopy = { title: value.title, text: value.text }; },
-        'state.config': { handler(config) { this.$vuetify.theme.dark = !config || config.gui.theme !== 'light'; document.documentElement.lang = htmlLanguage(config && config.uilanguage || initialLanguage); }, immediate: true },
+        'themeTokens.darkInk': { handler(darkInk) { this.$vuetify.theme.dark = !darkInk; }, immediate: true },
+        'state.config': { handler(config) { document.documentElement.lang = htmlLanguage(config && config.uilanguage || initialLanguage); }, immediate: true },
         'state.media'() { this.mediaFailed = false; }
     },
     mounted() {
